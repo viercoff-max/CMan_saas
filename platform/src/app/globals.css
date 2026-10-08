@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+:root {
+  --canvas: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #14181f;
+  --muted: #5d6675;
+  --line: #e3e6eb;
+  --brand: #0f766e;
+  --brand-dark: #0b5c56;
+  --danger: #c0392b;
+  --on-brand: #ffffff;
+  --on-danger: #ffffff;
+  --ok: #15803d;
+  --warn: #b45309;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #0e1116;
+    --surface: #161b22;
+    --ink: #eef1f5;
+    --muted: #9aa4b2;
+    --line: #262d38;
+    --brand: #2dd4bf;
+    --brand-dark: #5eead4;
+    --danger: #ef6a5b;
+    --on-brand: #04211e;
+    --on-danger: #2a0a06;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+  }
+}
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brand-dark: var(--brand-dark);
+  --color-danger: var(--danger);
+  --color-on-brand: var(--on-brand);
+  --color-on-danger: var(--on-danger);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+}
+body { background: var(--canvas); color: var(--ink); font-family: var(--font-sans); }
+
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+/* iOS zooms into inputs under 16px; keep form controls at 16px on phones. */
+@media (max-width: 767px) {
+  input, select, textarea { font-size: 16px !important; }
+}

@@ -1,0 +1,39 @@
+{
+  "name": "platform",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "start:prod": "next build && next start -H 127.0.0.1",
+    "demo": "node scripts/seed-demo.mjs",
+    "purge": "node scripts/purge.mjs",
+    "delete-customer": "node scripts/delete-customer.mjs",
+    "set-password": "node scripts/set-password.mjs",
+    "lint": "eslint",
+    "setup": "node scripts/setup.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "backup": "node scripts/backup.mjs"
+  },
+  "dependencies": {
+    "mammoth": "^1.13.0",
+    "next": "16.3.8",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "unpdf": "^1.8.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^24.19.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.8",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^5.0.3"
+  }
+}

@@ -1,0 +1,24 @@
+#!/bin/sh
+# Blocks commits that stage secrets. Enable once per clone:  git config core.hooksPath .githooks
+# Lightweight local layer; CI (gitleaks) is the authoritative gate.
+
+staged="$(git diff --cached --name-only --diff-filter=ACM)"
+[ -z "$staged" ] && exit 0
+
+bad_names="$(printf '%s\n' "$staged" | grep -E '(^|/)(\.env(\.[^/]*)?|\.dev\.vars|local\.properties|keystore\.properties)$|service-account[^/]*\.json$|\.(jks|keystore|p12|pem)$' | grep -vE '(^|/)\.env\.example$|(^|/)debug\.keystore$')"
+if [ -n "$bad_names" ]; then
+  echo "pre-commit: refusing to commit secret-looking files:" >&2
+  printf '  %s\n' $bad_names >&2
+  echo "Remove them from the index (git reset HEAD <file>) and make sure they are in .gitignore." >&2
+  exit 1
+fi
+
+patterns='-----BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY-----|shpat_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|ghp_[A-Za-z0-9]{30,}|xox[bp]-[A-Za-z0-9-]{20,}|EAA[A-Za-z0-9]{60,}|sk-[A-Za-z0-9]{32,}'
+hits="$(git diff --cached -U0 --no-color -- . ':(exclude)*.lock' ':(exclude)package-lock.json' | grep -E '^\+' | grep -vE '^\+\+\+' | grep -E "$patterns" | head -5)"
+if [ -n "$hits" ]; then
+  echo "pre-commit: staged changes look like they contain a credential (values hidden):" >&2
+  printf '%s\n' "$hits" | sed -E 's/[A-Za-z0-9_-]{20,}/[redacted]/g' >&2
+  echo "If this is a false positive, commit with: git -c core.hooksPath=/dev/null commit ..." >&2
+  exit 1
+fi
+exit 0
