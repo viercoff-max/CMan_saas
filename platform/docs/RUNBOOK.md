@@ -4,14 +4,14 @@ Plain steps for the person who runs the server. Commands are for Windows (PowerS
 
 ## 1. Move everything out of OneDrive (do this once, before real customers)
 
-The project folder is inside OneDrive today. OneDrive copies the database (customer messages), `.env.local` (the key that unlocks the Shopify/Meta tokens) and the uploads to Microsoft's cloud. That is a privacy problem.
+**Status (2026-10-08):** the project now lives outside OneDrive, at `C:\dev\Proyectos\Momentia\Chefman_Saas\platform`. What is still open: the OLD copy at `C:\Users\elect\OneDrive\Desktop\Proyectos` still syncs the database, `.env.local` and the uploads to Microsoft's cloud (step 6, owner action), and the secrets that were synced must be rotated (step 8).
 
 1. Stop the app.
-2. Copy the project folder to a non-synced place, for example `C:\SocialInbox\platform`.
+2. ~~Copy the project folder to a non-synced place.~~ Done: use `C:\dev\Proyectos\Momentia\Chefman_Saas\platform`. Optionally keep `DATA_DIR` outside the project folder too (steps 3 to 5).
 3. Create the data folder: `C:\ProgramData\SocialInbox\data`.
 4. Move the contents of the old `data\` folder (`app.db`, `app.db-wal`, `app.db-shm`, `uploads\`, `outbox\`) into `C:\ProgramData\SocialInbox\data`.
 5. In `C:\SocialInbox\platform\.env.local` add the line `DATA_DIR=C:\ProgramData\SocialInbox\data`.
-6. Delete the old copy from OneDrive, then empty the OneDrive recycle bin and check the online recycle bin at onedrive.com.
+6. Delete the old OneDrive copy (`C:\Users\elect\OneDrive\Desktop\Proyectos`; the owner does this, nothing in it is missing from `C:\dev\Proyectos`), then empty the OneDrive recycle bin and check the online recycle bin at onedrive.com.
 7. Restrict access to that folder: right-click `C:\ProgramData\SocialInbox`, Properties, Security, leave only Administrators and the Windows user that runs the app. Turn on BitLocker for the disk.
 8. **Rotate the secrets.** They were already synced, so treat them as exposed:
    - `ADMIN_PASSWORD`: run `npm run set-password -- admin@chefman.local`. It prints a new password once; save it in a password manager. Then **delete the `ADMIN_PASSWORD=` line** from `.env.local` (it is only used the first time).

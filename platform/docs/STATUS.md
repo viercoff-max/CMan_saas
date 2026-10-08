@@ -1,4 +1,8 @@
-# Social Inbox: status for the owner (2026-10-05)
+# Social Inbox: status for the owner (2026-10-08)
+
+> **Workspace:** `C:\dev\Proyectos\Momentia\Chefman_Saas\platform` (outside OneDrive, git repo on `main`, no remote). The old OneDrive copy is obsolete and still has to be deleted by the owner.
+> **Checks (2026-10-08):** typecheck clean, lint 0 errors (7 warnings), 465/465 tests. Mocked-network tests are `*-integration.test.ts`; `*-live.test.ts` (real APIs) is excluded from `npm test`.
+> **To go live:** `docs/GO-LIVE.md` (Meta and Shopify steps) and `docs/RUNBOOK.md`.
 
 A chat assistant for Chefman (first brand) on WhatsApp, Instagram and Messenger. It runs on one computer today
 (Next.js + a SQLite file). The admin panel is in Spanish, with an English toggle.

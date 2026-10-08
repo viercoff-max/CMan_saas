@@ -11,6 +11,7 @@ Read first: `proposals/00-project-brief.md`, then `platform/AGENTS.md` (Next.js 
 - Never read or print `platform/.env.local`. Add new variables to `.env.example` (names only).
 - Customer messages and order data are personal data: respect `lib/retention`, never log message bodies or contact details.
 - Shopify access is read-only unless the owner approves otherwise. Tokens are encrypted at rest (`lib/crypto.ts`): do not bypass.
-- `*-live.test.ts` tests hit real APIs: run only with approval and test credentials.
-- No git repository yet: create one before large changes (see AUDIT_2026-10-08.md).
+- `*-live.test.ts` tests hit real APIs: run only with approval and test credentials. They are excluded from `npm test` (see `platform/vitest.config.ts`); mocked network tests are named `*-integration.test.ts`.
+- Git: repo on `main` (workspace `C:\dev\Proyectos`, outside OneDrive), no remote yet. Conventional Commits; keep `.githooks/pre-commit` enabled. Never push or add a remote without approval.
+- Demo data: `npm run demo` (localhost only, refuses production) and `npm run demo -- --reset`. Going live with Meta/Shopify: follow `platform/docs/GO-LIVE.md`.
 - Shared rules: ../../ai-rules-template/docs/rules/ (security.md, agent-safety.md, vercel.md, react-typescript.md).
