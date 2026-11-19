@@ -58,18 +58,43 @@ Add the Supabase implementation of `DataStore` (`src/lib/data/supabase`, `DATA_B
 - `src/lib/retention/`: `purgeOldData`, `deleteCustomerData`, `exportCustomerData`, Meta `handleMetaDataDeletion`. CLI: `npm run purge | delete-customer | set-password | backup`. Ops guide: `docs/RUNBOOK.md`.
 - `db.ts` exports `DATA_DIR` and `OUTBOX_DIR`; everything that writes customer data to disk must stay under `DATA_DIR`.
 
-## Data layer (stage 1 of the Supabase move, 2026-11-19)
+## Data layer (stage 1: 2026-11-19 interface + SQLite; stage 2: 2026-11-20 Supabase backend)
 - `src/lib/data/types.ts`: the `DataStore` contract, split into sub-repos: `tenants`, `members` (read-only), `users` (local
   login until Supabase Auth), `settings`, `brand`, `sections`, `sources`, `chunks`, `conversations`, `messages`, `addons`,
   `channels`, `secrets`, `audit`, `usage` (ai_usage per month), `limiter`, `rateLimits`, `retention`. Every method is async;
   tenant-owned data always takes `tenantId` explicitly. Cross-tenant methods are named and documented as such (webhook
   routing, Meta deletion callback, retention job, login by email).
-- `src/lib/data/index.ts`: `getData()` picks the backend from `DATA_BACKEND` (`sqlite` default; `supabase` throws "not implemented yet").
+- `src/lib/data/index.ts`: `getData()` picks the backend from `DATA_BACKEND` (`sqlite` default, or `supabase`).
+- `src/lib/data/rules.ts`: backend-neutral rules both backends share (brand validation = the CHECK constraints, setting
+  clamps, `usagePeriod`). `src/lib/data/errors.ts`: `DataConflictError`, `DataValidationError`, `DataBackendError`
+  (code + table/op only, never row values), `DataBackendUnsupportedError`.
 - `src/lib/data/sqlite/**`: the SQLite implementation (all SQL lives here). `src/lib/db.ts` keeps the connection, schema and
   additive migrations (`runMigrations`).
+- `src/lib/data/supabase/**` (SERVER ONLY): service-role client from `NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SECRET_KEY`
+  (clear error when missing). The service role bypasses RLS, so tenant isolation is enforced in code: every query on a
+  tenant-owned table goes through `scoped(db, tenantId)` (`client.ts`), which adds `tenant_id = …` to every
+  select/update/delete, stamps `tenant_id` on inserted rows, strips it from update patches and forces `p_tenant` on RPCs.
+  Only the documented cross-tenant lookups use the raw client. Mapping vs SQLite: uuid tenant/row ids (a non-uuid
+  tenant id throws `DataValidationError`; a non-uuid row id is "not found"); `tenants.ensure(slug, name)` returns the uuid
+  (SQLite returns the id it was given; callers must use the returned id); `channel_accounts.external_id` column
+  (`uq_channel_external` 23505 -> `DataConflictError("channel_in_use")`); `messages.provider_message_id` column
+  (`uq_msg_provider` 23505 = duplicate inbound -> the stored message is returned); secrets in `tenant_secrets(kind,key)`
+  (same lib/crypto.ts ciphertext); timestamptz <-> ISO-Z / epoch ms; `conversations.legal_hold` (counts as legal hold,
+  surfaced as `state.legalHold` to lib/retention); `agent_settings.tone_saved_at`; `business_hours` jsonb <-> string;
+  `sources.storage_path` = `filePath`. Reads past PostgREST's row cap are paged.
+  Atomic operations are SQL functions (EXECUTE only for service_role): `rate_limit_hit`, `usage_add`, `conversation_touch`
+  (`supabase/migrations/20261120100000_server_rpc_counters.sql`, also adds `login_attempts`) and `retention_purge_tenant`,
+  `retention_delete_conversations` (`20261120100100_server_rpc_retention.sql`).
+  Not offered in Supabase mode (clear `DataBackendUnsupportedError`): local password login (`users.findLoginByEmail`,
+  `create`, `setPasswordHash`: Supabase Auth, stage 3) and creating `kind: "file"` sources (file bytes move to the
+  `tenant-files` Storage bucket in stage 4; TODO in `supabase/knowledge.ts`).
 - Secrets only through `secrets` (`get/set/clear(tenantId, "addon" | "channel", key)`): `addons.get` / `channels.get` never return them.
   Disconnecting an add-on (`addons.save(..., {status:"disconnected"})`) also wipes its secrets; channels need `secrets.clear`.
 - `channels.save` throws `DataConflictError` when another tenant already has that account connected.
-- Guards: `src/lib/data/__tests__/boundary.test.ts` (no `node:sqlite` / `getDb()` / SQL outside the data layer),
-  `tenant-isolation.test.ts` (tenant A cannot read or change tenant B through any sub-repo), and the type-aware
-  `no-floating-promises` / `no-misused-promises` lint rules (a forgotten `await` is a lint error).
+- Guards: `src/lib/data/__tests__/boundary.test.ts` (no `node:sqlite` / `getDb()` / SQL outside the data layer);
+  `data-store-contract.ts`, the ONE behavioural suite (cross-tenant negative tests + behaviour) run by
+  `tenant-isolation.test.ts` (SQLite), `supabase-backend.test.ts` (Supabase store on the in-memory query-builder fake
+  `supabase-fake.ts`, plus mapper/error tests and the proof that every tenant-owned query carried a tenant_id filter) and
+  `supabase-contract-live.test.ts` (real project; only with `RUN_LIVE=1`, excluded by `*-live`); `supabase-boundary.test.ts`
+  (no "use client" file imports the data layer or the service key); and the type-aware `no-floating-promises` /
+  `no-misused-promises` lint rules (a forgotten `await` is a lint error).

@@ -1,7 +1,7 @@
 // Agent settings and brand settings (SQLite).
 import { newId, nowIso } from "../../ids";
 import type { AgentSettings } from "../../types";
-import { DataValidationError } from "../errors";
+import { BRAND_DEFAULTS, clampCrossSell, clampTone, validateBrand } from "../rules";
 import type { BrandRepo, BrandSettings, SettingsRepo } from "../types";
 import { db, type Row } from "./conn";
 
@@ -29,8 +29,8 @@ export const settings: SettingsRepo = {
   async get(tenantId) { return readSettings(tenantId); },
   async save(tenantId, patch) {
     const n = { ...readSettings(tenantId), ...patch };
-    const tone = Math.min(5, Math.max(1, Math.round(Number(n.toneLevel)))) as AgentSettings["toneLevel"];
-    const cs = Math.min(3, Math.max(0, Math.round(Number(n.crossSellLevel)))) as AgentSettings["crossSellLevel"];
+    const tone = clampTone(n.toneLevel);
+    const cs = clampCrossSell(n.crossSellLevel);
     db().prepare(
       `UPDATE agent_settings SET agent_name=?, tone_level=?, language_default=?, language_alt=?, greeting=?,
        fallback_message=?, handoff_email=?, business_hours=?, cross_sell_level=?, bot_enabled=?, updated_at=? WHERE tenant_id=?`
@@ -48,18 +48,6 @@ export const settings: SettingsRepo = {
 };
 
 // ---------- brand (white-label) ----------
-export const BRAND_DEFAULTS = { primaryColor: "#0F766E", accentColor: "#14181F", menuBgColor: "#F6F7F9", headingFont: "system" } as const;
-const HEX = /^#[0-9A-Fa-f]{6}$/;
-const FONT = /^[A-Za-z0-9 ]{1,60}$/;
-
-/** Same rules as the CHECK constraints of public.brand_settings. */
-export function validateBrand(b: Omit<BrandSettings, "tenantId" | "updatedAt">): void {
-  if (typeof b.displayName !== "string" || b.displayName.length > 120) throw new DataValidationError("displayName");
-  if (b.logoPath !== null && (typeof b.logoPath !== "string" || b.logoPath.length > 300)) throw new DataValidationError("logoPath");
-  for (const k of ["primaryColor", "accentColor", "menuBgColor"] as const) if (!HEX.test(String(b[k]))) throw new DataValidationError(k);
-  if (!FONT.test(String(b.headingFont))) throw new DataValidationError("headingFont");
-}
-
 function readBrand(tenantId: string): BrandSettings {
   const d = db();
   const r = d.prepare("SELECT * FROM brand_settings WHERE tenant_id = ?").get(tenantId) as Row | undefined;

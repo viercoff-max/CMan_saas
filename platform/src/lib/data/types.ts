@@ -17,12 +17,16 @@ export type DataBackend = "sqlite" | "supabase";
 export interface TenantInfo { id: string; name: string }
 export interface TenantsRepo {
   get(tenantId: string): Promise<TenantInfo | null>;
-  /** Bootstrap only (first-run seed, local demo). Supabase creates tenants through the create_tenant RPC. */
-  ensure(tenantId: string, name: string): Promise<void>;
+  /**
+   * Bootstrap only (first-run seed, local demo, tests). Creates the tenant when missing and returns ITS id:
+   * SQLite uses `tenantIdOrSlug` as the (text) id; Supabase treats it as the tenant slug (or an existing uuid) and
+   * returns the uuid. Callers must use the returned id. Real Supabase sign-ups use the create_tenant RPC instead.
+   */
+  ensure(tenantIdOrSlug: string, name: string): Promise<string>;
 }
 export type MemberRole = "owner" | "admin" | "agent";
 export interface Member { userId: string; tenantId: string; name: string; email: string; role: MemberRole }
-/** Read-only for now (stage 3 adds invitations / role changes with Supabase Auth). */
+/** Read-only for now (stage 3 adds invitations / role changes with Supabase Auth). Supabase: tenant_members + auth users. */
 export interface MembersRepo {
   list(tenantId: string): Promise<Member[]>;
 }

@@ -10,6 +10,7 @@ export const tenants: TenantsRepo = {
   },
   async ensure(tenantId, name) {
     db().prepare("INSERT OR IGNORE INTO tenants (id, name) VALUES (?, ?)").run(tenantId, name);
+    return tenantId;
   },
 };
 

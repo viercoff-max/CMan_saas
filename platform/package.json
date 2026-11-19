@@ -18,6 +18,8 @@
     "backup": "node scripts/backup.mjs"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.119.2",
     "mammoth": "^1.13.0",
     "next": "16.3.8",
     "react": "19.2.8",

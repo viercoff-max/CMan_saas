@@ -1,5 +1,6 @@
 // Audit log, AI usage, engine limiter and login/rate-limit counters (SQLite).
 import { newId, nowIso } from "../../ids";
+import { nonNeg, usagePeriod } from "../rules";
 import type { AuditQuery, AuditRepo, LimiterRepo, RateLimitsRepo, UsageRepo, UsageRow } from "../types";
 import { db, type Row } from "./conn";
 
@@ -30,9 +31,6 @@ export const audit: AuditRepo = {
   },
 };
 
-/** First day of the month of `at` (UTC), as "YYYY-MM-01" (Supabase ai_usage.period is a date). */
-export const usagePeriod = (at: Date = new Date()) => `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}-01`;
-const nonNeg = (n: unknown) => Math.max(0, Math.floor(Number(n) || 0));
 
 function readUsage(tenantId: string, period: string): UsageRow {
   const r = db().prepare("SELECT requests, input_tokens, output_tokens FROM ai_usage WHERE tenant_id=? AND period=?").get(tenantId, period) as Row | undefined;
