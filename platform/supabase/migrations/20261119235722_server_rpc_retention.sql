@@ -1,5 +1,5 @@
 -- Stage 2 (Supabase DataStore): retention and per-customer deletion, each in ONE transaction.
--- NOT APPLIED automatically: review, then apply with the Supabase CLI / MCP (owner approval).
+-- Applied to the Supabase project on 2026-11-19 (owner approved). Tests: supabase/tests/rpc_server_functions.sql.
 --
 -- Same safety rules as 20261120100000_server_rpc_counters.sql: SECURITY DEFINER, search_path = '', fully
 -- qualified names, EXECUTE only for service_role, explicit p_tenant (forced by the app's scoped rpc) and every

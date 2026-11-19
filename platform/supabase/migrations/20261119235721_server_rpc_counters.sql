@@ -1,5 +1,5 @@
 -- Stage 2 (Supabase DataStore): server-only counters that PostgREST cannot update atomically.
--- NOT APPLIED automatically: review, then apply with the Supabase CLI / MCP (owner approval).
+-- Applied to the Supabase project on 2026-11-19 (owner approved). Tests: supabase/tests/rpc_server_functions.sql.
 --
 -- Every function here:
 --   * is SECURITY DEFINER with search_path = '' and fully qualified names (no search_path hijacking);
