@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { withSession, json } from "@/lib/channels/api";
 import { checkSameOrigin } from "@/lib/security/origin";
-import { getOrCreateConversation, listMessages, markConversationRead } from "@/lib/store";
+import { getData } from "@/lib/data";
 import { handleInbound } from "@/lib/engine";
 import { deleteSimulatorConversation } from "@/lib/channels/repo";
 
@@ -10,10 +10,11 @@ const simId = (userId: string) => `sim-${userId}`;
 
 /** GET: current simulator conversation (if any). */
 export async function GET() {
-  return withSession((s) => {
-    const conv = getOrCreateConversation(s.tenantId, "simulator", simId(s.userId), "Simulador");
-    markConversationRead(s.tenantId, conv.id);
-    return json({ conversation: conv, messages: listMessages(s.tenantId, conv.id) });
+  return withSession(async (s) => {
+    const data = getData();
+    const conv = await data.conversations.getOrCreate(s.tenantId, "simulator", simId(s.userId), "Simulador");
+    await data.conversations.markRead(s.tenantId, conv.id);
+    return json({ conversation: conv, messages: await data.messages.list(s.tenantId, conv.id) });
   });
 }
 
@@ -26,17 +27,18 @@ export async function POST(req: Request) {
     const reply = await handleInbound({
       tenantId: s.tenantId, channel: "simulator", externalId: simId(s.userId), customerName: "Simulador", text: parsed.data.text,
     });
-    const conv = getOrCreateConversation(s.tenantId, "simulator", simId(s.userId), "Simulador");
-    markConversationRead(s.tenantId, conv.id);
-    return json({ reply, conversation: conv, messages: listMessages(s.tenantId, conv.id) });
+    const data = getData();
+    const conv = await data.conversations.getOrCreate(s.tenantId, "simulator", simId(s.userId), "Simulador");
+    await data.conversations.markRead(s.tenantId, conv.id);
+    return json({ reply, conversation: conv, messages: await data.messages.list(s.tenantId, conv.id) });
   });
 }
 
 /** DELETE: restart the simulated conversation. */
 export async function DELETE(req: Request) {
   const bad = checkSameOrigin(req); if (bad) return bad;
-  return withSession((s) => {
-    deleteSimulatorConversation(s.tenantId, simId(s.userId));
+  return withSession(async (s) => {
+    await deleteSimulatorConversation(s.tenantId, simId(s.userId));
     return json({ ok: true });
   });
 }

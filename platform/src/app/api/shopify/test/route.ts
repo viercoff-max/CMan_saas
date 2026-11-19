@@ -10,10 +10,10 @@ export async function POST(req: Request) {
   const tenantId = await tenantOr401();
   if (typeof tenantId !== "string") return tenantId;
   // Same order/email oracle as the bot: keep it slow.
-  const limited = limitOr429(`shopify-test:${tenantId}`, 20, 10 * 60_000); if (limited) return limited;
+  const limited = await limitOr429(`shopify-test:${tenantId}`, 20, 10 * 60_000); if (limited) return limited;
   const body = z.object({ order: z.string().min(1).max(40), email: z.string().min(3).max(200) }).safeParse(await req.json().catch(() => null));
   if (!body.success) return json({ error: "invalid_input" }, 400);
-  if (!shopifyConnector.isConnected(tenantId)) return json({ error: "not_connected" }, 400);
+  if (!(await shopifyConnector.isConnected(tenantId))) return json({ error: "not_connected" }, 400);
   try {
     const r = await shopifyConnector.lookupOrderStatus(tenantId, body.data.order, body.data.email);
     return json({ result: r });

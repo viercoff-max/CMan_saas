@@ -4,14 +4,13 @@
 // We must answer JSON {url, confirmation_code}; `url` is a page where the person can check the status.
 //
 // The ROUTE is owned by the inbox module (src/app/api/webhooks/meta/data-deletion/route.ts):
-//   POST: const { url, confirmation_code } = handleMetaDataDeletion(signed_request)  // throws MetaDeletionError -> 400
-//   GET ?code=: deletionStatus(code) -> "received" | "unknown" (the status page Meta links to)
+//   POST: const { url, confirmation_code } = await handleMetaDataDeletion(signed_request)  // rejects with MetaDeletionError -> 400
+//   GET ?code=: await deletionStatus(code) -> "received" | "unknown" (the status page Meta links to)
 //
 // CAVEAT: user_id is the app-scoped id from Facebook Login. Messenger PSIDs / IG ids are different ids, so the match
 // below only finds data when they coincide; it is still the required, auditable intake. Other requests go to a person.
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { getDb } from "../db";
-import { audit } from "../store";
+import { getData } from "../data";
 import { deleteCustomerData } from "./index";
 
 export type SignedRequestPayload = { algorithm?: string; issued_at?: number; user_id?: string; [k: string]: unknown };
@@ -68,22 +67,19 @@ export class MetaDeletionError extends Error {
  * kept and reviewed by a person), audit with the confirmation code only, and return Meta's {url, confirmation_code}.
  * Throws MetaDeletionError when the secret is missing or the signed_request is invalid (route answers 400).
  */
-export function handleMetaDataDeletion(signedRequest: string, opts: { appSecret?: string; baseUrl?: string } = {}): { url: string; confirmation_code: string } {
+export async function handleMetaDataDeletion(signedRequest: string, opts: { appSecret?: string; baseUrl?: string } = {}): Promise<{ url: string; confirmation_code: string }> {
   const r = buildMetaDeletionResponse(signedRequest, opts);
   if (!r.ok) throw new MetaDeletionError(r.error);
-  const rows = getDb().prepare(
-    "SELECT DISTINCT tenant_id, channel FROM conversations WHERE external_id = ? AND channel IN ('messenger','instagram')",
-  ).all(r.userId) as { tenant_id: string; channel: string }[];
-  for (const row of rows) deleteCustomerData(row.tenant_id, row.channel, r.userId, { actor: "meta-deletion" });
-  audit(rows[0]?.tenant_id ?? "system", "meta-deletion", "privacy.meta_deletion_request",
+  const data = getData();
+  const rows = await data.retention.findMetaDeletionTargets(r.userId);
+  for (const row of rows) await deleteCustomerData(row.tenantId, row.channel, r.userId, { actor: "meta-deletion" });
+  await data.audit.log(rows[0]?.tenantId ?? "system", "meta-deletion", "privacy.meta_deletion_request",
     JSON.stringify({ confirmation_code: r.confirmation_code, matched: rows.length }));
   return { url: r.url, confirmation_code: r.confirmation_code };
 }
 
 /** For the status page: was this confirmation code received? (audit lookup, no PII). */
-export function deletionStatus(code: string): "received" | "unknown" {
+export async function deletionStatus(code: string): Promise<"received" | "unknown"> {
   if (!/^[A-F0-9]{20}$/.test(code)) return "unknown";
-  const row = getDb().prepare("SELECT 1 FROM audit_log WHERE action = 'privacy.meta_deletion_request' AND detail LIKE ? LIMIT 1")
-    .get(`%"confirmation_code":"${code}"%`);
-  return row ? "received" : "unknown";
+  return (await getData().retention.metaDeletionReceived(code)) ? "received" : "unknown";
 }

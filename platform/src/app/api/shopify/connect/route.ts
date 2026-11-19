@@ -11,7 +11,7 @@ export async function POST(req: Request) {
   const bad = checkSameOrigin(req); if (bad) return bad;
   const tenantId = await tenantOr401();
   if (typeof tenantId !== "string") return tenantId;
-  const limited = limitOr429(`shopify-connect:${tenantId}`, 10, 15 * 60_000); if (limited) return limited;
+  const limited = await limitOr429(`shopify-connect:${tenantId}`, 10, 15 * 60_000); if (limited) return limited;
   if (!oauthConfigured()) return json({ error: "oauth_not_configured" }, 400);
   const body = z.object({ shop: z.string().min(1).max(200) }).safeParse(await req.json().catch(() => null));
   if (!body.success) return json({ error: "invalid_shop" }, 400);

@@ -1,6 +1,6 @@
 // Shopify OrdersConnector. STATUS ONLY: never returns address, items, phone, totals or payment.
 import type { OrdersConnector, OrderStatusResult } from "../types";
-import { getAddon } from "../store";
+import { getData } from "../data";
 import { hasAllOrdersScope, normalizeOrderNumber, orderNameQuery } from "./config";
 import { shopifyGraphql, type GqlResult } from "./graphql";
 import { getShopifySecrets } from "./token";
@@ -51,11 +51,11 @@ export function emailAccessDenied(errors: GqlResult<unknown>["errors"]): boolean
 
 export const shopifyConnector: OrdersConnector = {
   key: "shopify",
-  isConnected(tenantId) {
-    try { return getAddon(tenantId, "shopify").status === "connected"; } catch { return false; }
+  async isConnected(tenantId) {
+    try { return (await getData().addons.get(tenantId, "shopify")).status === "connected"; } catch { return false; }
   },
   async lookupOrderStatus(tenantId, orderNumber, email): Promise<ShopifyLookupResult> {
-    const addon = getAddon(tenantId, "shopify");
+    const addon = await getData().addons.get(tenantId, "shopify");
     if (addon.status !== "connected") return { found: false };
     if (addon.publicInfo.mock === true) return mockLookup(orderNumber, email); // demo store: no 60-day window
     let sec = await getShopifySecrets(tenantId);

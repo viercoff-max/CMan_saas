@@ -37,7 +37,7 @@ export async function POST(req: Request) {
 // Public and read-only: answers only whether that confirmation code was received (no PII).
 export async function GET(req: Request) {
   const code = (new URL(req.url).searchParams.get("code") ?? "").trim().slice(0, 64);
-  const status = code ? deletionStatus(code) : "unknown";
+  const status = code ? await deletionStatus(code) : "unknown";
   return new Response(JSON.stringify({
     confirmation_code: code || null,
     status,

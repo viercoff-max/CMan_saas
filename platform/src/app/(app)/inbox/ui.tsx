@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui";
 import type { Channel, ConversationStatus } from "@/lib/types";
 
 const PLATFORM: Record<Channel, { label: string; cls: string }> = {
+  telegram: { label: "TG", cls: "bg-sky-700 text-white" },
   whatsapp: { label: "WA", cls: "bg-green-700 text-white" },
   instagram: { label: "IG", cls: "bg-pink-700 text-white" },
   messenger: { label: "MS", cls: "bg-blue-700 text-white" },

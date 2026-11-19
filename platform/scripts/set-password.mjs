@@ -8,9 +8,9 @@ if (!email) {
   console.error("Usage: npm run set-password -- <admin email>");
   process.exit(2);
 }
-const { getDb } = await loadApp("lib/db.ts");
-const db = getDb();
-const user = db.prepare("SELECT id, tenant_id FROM users WHERE email = ?").get(email);
+const { getData } = await loadApp("lib/data/index.ts");
+const data = getData();
+const user = await data.users.findLoginByEmail(email);
 if (!user) {
   console.error("No user with that email.");
   process.exit(1);
@@ -18,8 +18,7 @@ if (!user) {
 const password = crypto.randomBytes(15).toString("base64url");
 const salt = crypto.randomBytes(16).toString("hex");
 const hash = `${salt}:${crypto.scryptSync(password, salt, 64).toString("hex")}`; // same format as src/lib/auth.ts
-db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hash, user.id);
-db.prepare("INSERT INTO audit_log (id, tenant_id, actor, action, detail) VALUES (?,?,?,?,?)")
-  .run(crypto.randomUUID(), user.tenant_id, "cli", "auth.password_rotated", user.id);
+await data.users.setPasswordHash(user.id, hash);
+await data.audit.log(user.tenantId, "cli", "auth.password_rotated", user.id);
 console.log(`New password for ${email}: ${password}`);
 console.log("Save it in your password manager now. It is not stored anywhere in clear text.");

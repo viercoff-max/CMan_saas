@@ -2,10 +2,7 @@
 // Pipeline: dedupe -> store inbound -> silence checks -> language -> deterministic escalation -> pending offer
 //           -> order flow (templates only) -> knowledge (retrieval + LLM + validator) -> cross-sell -> store reply.
 import type { AgentSettings, Conversation, EngineReply, InboundEvent, OrdersConnector } from "../types";
-import {
-  addMessage, getAgentSettings, getOrCreateConversation, listChunks,
-  setConversationState, setConversationStatus,
-} from "../store";
+import { getData } from "../data";
 import { ALWAYS_ON_SECTIONS, getEffectiveSectionContent } from "../context/section-repo";
 import { getOrdersConnector as defaultGetOrdersConnector } from "../connectors/registry";
 import { notifyHandoff as defaultNotifyHandoff } from "../channels/handoff";
@@ -14,7 +11,6 @@ import { detectLanguage, type Lang } from "./lang";
 import { defaultLLM, type LLM } from "./llm";
 import { runOrderFlow, type LookupLimiter, type OrderState } from "./orders";
 import { buildSystemPrompt, buildUserMessage, HANDOFF_TOKEN } from "./prompt";
-import { hasProviderMessage, recentMessages } from "./repo";
 import { isProductChunk, retrieve, type Retrieved } from "./retrieve";
 import * as T from "./templates";
 import * as C from "./copy";
@@ -39,7 +35,7 @@ const MAX_INBOUND_CHARS = 2000;
 export interface EngineDeps {
   llm?: LLM;
   now?: () => Date;
-  getOrdersConnector?: (tenantId: string) => OrdersConnector | null;
+  getOrdersConnector?: (tenantId: string) => OrdersConnector | null | Promise<OrdersConnector | null>;
   notifyHandoff?: (tenantId: string, conversationId: string, reason: string) => Promise<void>;
 }
 
@@ -77,29 +73,30 @@ export async function handleInbound(ev: EngineInboundEvent, deps: EngineDeps = {
   };
   const tenantId = ev.tenantId;
   const text = String(ev.text ?? "").slice(0, MAX_INBOUND_CHARS);
-  const conv = getOrCreateConversation(tenantId, ev.channel, ev.externalId, ev.customerName ?? "");
+  const data = getData();
+  const conv = await data.conversations.getOrCreate(tenantId, ev.channel, ev.externalId, ev.customerName ?? "");
 
   // 1. Dedupe + persist inbound
-  if (ev.providerMessageId && hasProviderMessage(tenantId, conv.id, ev.providerMessageId)) {
+  if (ev.providerMessageId && await data.messages.hasProviderMessage(tenantId, conv.id, ev.providerMessageId)) {
     return { text: "", escalated: false, reason: "duplicate" };
   }
   // PII: the stored body has emails masked (j***@gmail.com); the order flow below still parses the original `text`.
   const parsedMedia = parseMediaText(text);
   const media = ev.media ? { kind: ev.media, caption: parsedMedia?.caption ?? "" } : parsedMedia;
-  addMessage(tenantId, conv.id, {
+  await data.messages.add(tenantId, conv.id, {
     direction: "in", sender: "customer", body: maskEmailsInText(text),
-    meta: clean({ providerMessageId: ev.providerMessageId, media: media?.kind }),
+    meta: clean({ media: media?.kind }), providerMessageId: ev.providerMessageId || undefined,
   });
 
-  const settings = getAgentSettings(tenantId);
+  const settings = await data.settings.get(tenantId);
   if (conv.status === "needs_human" || conv.status === "human") return { text: "", escalated: false };
   if (!settings.botEnabled) {
     // Put it in the human queue once so nobody is left unanswered; the bot stays silent.
-    setConversationStatus(tenantId, conv.id, "needs_human", "bot_disabled");
+    await data.conversations.setStatus(tenantId, conv.id, "needs_human", "bot_disabled");
     await safeNotify(d, tenantId, conv.id, "bot_disabled");
     return { text: "", escalated: false };
   }
-  if (conv.status === "resolved") setConversationStatus(tenantId, conv.id, "bot");
+  if (conv.status === "resolved") await data.conversations.setStatus(tenantId, conv.id, "bot");
 
   const state = { ...(conv.state as EngineState) };
   if (conv.status === "resolved") { state.misses = 0; state.botTurns = 0; delete state.offer; state.capOffered = false; }
@@ -112,13 +109,13 @@ export async function handleInbound(ev: EngineInboundEvent, deps: EngineDeps = {
   // Per-conversation inbound throttle (caps LLM cost / queue flooding): one calm message, then silence.
   try {
     const nowMs = ctx.now.getTime();
-    const recent = recordInbound(tenantId, conv.id, nowMs);
+    const recent = await recordInbound(tenantId, conv.id, nowMs);
     if (recent > MAX_INBOUND_PER_WINDOW) {
       if (state.throttledAt && nowMs - state.throttledAt < INBOUND_WINDOW_MS) return { text: "", escalated: false, reason: "throttled" };
       state.throttledAt = nowMs;
       const body = C.throttled(lang, ctx.tone);
-      setConversationState(tenantId, conv.id, state as Record<string, unknown>);
-      addMessage(tenantId, conv.id, { direction: "out", sender: "bot", body, meta: { intent: "throttled", lang, escalated: false } });
+      await data.conversations.setState(tenantId, conv.id, state as Record<string, unknown>);
+      await data.messages.add(tenantId, conv.id, { direction: "out", sender: "bot", body, meta: { intent: "throttled", lang, escalated: false } });
       return { text: body, escalated: false, reason: "throttled" };
     }
   } catch (e) {
@@ -174,7 +171,7 @@ async function pipeline(ctx: Ctx): Promise<EngineReply> {
   // 3. Order status flow (templates only; email never reaches the LLM)
   const flow = await runOrderFlow({
     tenantId: ctx.tenantId, text, lang: ctx.lang, tone: ctx.tone, state: state.order ?? {},
-    connector: ctx.deps.getOrdersConnector(ctx.tenantId), noConnectorTold: !!state.noConnectorTold,
+    connector: await ctx.deps.getOrdersConnector(ctx.tenantId), noConnectorTold: !!state.noConnectorTold,
     limiter: lookupLimiter(ctx),
   });
   state.order = flow.state;
@@ -188,7 +185,7 @@ async function pipeline(ctx: Ctx): Promise<EngineReply> {
     let reply = flow.text;
     let crossSellSent = false;
     if (flow.resolved) {
-      const cs = crossSellFor(ctx, "order_status", []);
+      const cs = await crossSellFor(ctx, "order_status", []);
       if (cs) { reply += `\n\n${cs}`; crossSellSent = true; }
     }
     return finish(ctx, reply, { intent: flow.intent, crossSell: crossSellSent || undefined });
@@ -202,12 +199,12 @@ async function pipeline(ctx: Ctx): Promise<EngineReply> {
 function lookupLimiter(ctx: Ctx): LookupLimiter {
   const now = () => ctx.now.getTime();
   return {
-    isBlocked: (n, e) => {
-      try { return isLookupBlocked(ctx.tenantId, n, e, now()); }
+    isBlocked: async (n, e) => {
+      try { return await isLookupBlocked(ctx.tenantId, n, e, now()); }
       catch (err) { console.error("[engine] limiter check failed:", err instanceof Error ? err.message : "error"); return false; }
     },
-    recordFailure: (n, e) => {
-      try { recordLookupFailure(ctx.tenantId, n, e, now()); }
+    recordFailure: async (n, e) => {
+      try { await recordLookupFailure(ctx.tenantId, n, e, now()); }
       catch (err) { console.error("[engine] limiter record failed:", err instanceof Error ? err.message : "error"); }
     },
   };
@@ -229,10 +226,11 @@ function dedupeChunks<C extends { sourceId: string | null; text: string }>(chunk
 
 async function knowledgeAnswer(ctx: Ctx, injection: boolean): Promise<EngineReply> {
   const { tenantId, text, state } = ctx;
-  const chunks = dedupeChunks(listChunks(tenantId));
+  const data = getData();
+  const chunks = dedupeChunks(await data.chunks.list(tenantId));
   const exclude = (c: { sectionKey: string | null }) => !!c.sectionKey && ALWAYS_ON.has(c.sectionKey);
   let hits = retrieve(text, chunks, { k: 4, exclude });
-  const history = recentMessages(tenantId, ctx.conv.id, 7).slice(0, -1); // without the current inbound
+  const history = (await data.messages.recent(tenantId, ctx.conv.id, 7)).slice(0, -1); // without the current inbound
   if (!hits.length) {
     // Short follow-ups ("¿y cuánto tarda?") borrow context from the previous customer message.
     const prev = [...history].reverse().find((m) => m.sender === "customer")?.body;
@@ -246,11 +244,11 @@ async function knowledgeAnswer(ctx: Ctx, injection: boolean): Promise<EngineRepl
   }
 
   // Always-on rules: file text when "Usar un archivo" is on (typed text if the file failed) + linked sources, capped.
-  const sec = (k: "dos_donts" | "escalation") => getEffectiveSectionContent(tenantId, k).text;
+  const sec = async (k: "dos_donts" | "escalation") => (await getEffectiveSectionContent(tenantId, k)).text;
   const sources = hits.map((h) => h.chunk);
   const system = buildSystemPrompt({
     agentName: ctx.settings.agentName, tone: ctx.tone, lang: ctx.lang,
-    dosDonts: sec("dos_donts"), escalationRules: sec("escalation"), chunks: sources,
+    dosDonts: await sec("dos_donts"), escalationRules: await sec("escalation"), chunks: sources,
   });
   // History for the LLM: no order-flow bot replies (status, carrier, tracking), and
   // emails (raw or masked), phones and order/tracking-like numbers stripped from the rest.
@@ -273,14 +271,14 @@ async function knowledgeAnswer(ctx: Ctx, injection: boolean): Promise<EngineRepl
   let reply = v.text;
   let crossSellSent = false;
   if (intent === "product_question") {
-    const cs = crossSellFor(ctx, intent, hits);
+    const cs = await crossSellFor(ctx, intent, hits);
     if (cs) { reply += `\n\n${cs}`; crossSellSent = true; }
   }
   return finish(ctx, reply, { intent, crossSell: crossSellSent || undefined, ...meta });
 }
 
 // ---------------- cross-sell ----------------
-function crossSellFor(ctx: Ctx, intent: "order_status" | "product_question", hits: Retrieved[]): string | null {
+async function crossSellFor(ctx: Ctx, intent: "order_status" | "product_question", hits: Retrieved[]): Promise<string | null> {
   const level = ctx.settings.crossSellLevel;
   if (!level || level <= 0 || ctx.state.crossSellSent || isComplaint(ctx.text)) return null;
   let candidates: Retrieved[];
@@ -289,8 +287,9 @@ function crossSellFor(ctx: Ctx, intent: "order_status" | "product_question", hit
     candidates = hits.slice(1).filter((h) => isProductChunk(h.chunk) && h.chunk.id !== main?.id && (h.chunk.title || "") !== (main?.title || ""));
   } else {
     // After an order status: retrieve product chunks related to what the customer talked about (redacted).
-    const recent = recentMessages(ctx.tenantId, ctx.conv.id, 10).filter((m) => m.sender === "customer").map((m) => redactPII(m.body)).join(" ");
-    candidates = retrieve(recent, listChunks(ctx.tenantId).filter(isProductChunk), { k: 1, minCoverage: 0.1 });
+    const data = getData();
+    const recent = (await data.messages.recent(ctx.tenantId, ctx.conv.id, 10)).filter((m) => m.sender === "customer").map((m) => redactPII(m.body)).join(" ");
+    candidates = retrieve(recent, (await data.chunks.list(ctx.tenantId)).filter(isProductChunk), { k: 1, minCoverage: 0.1 });
   }
   const pick = candidates[0]?.chunk;
   if (!pick) return null;
@@ -319,8 +318,9 @@ async function finish(ctx: Ctx, body: string, meta: Record<string, unknown>, opt
     state.offer = { reason: "human_request" };
     meta = { ...meta, capOffered: true };
   }
-  setConversationState(ctx.tenantId, ctx.conv.id, state as Record<string, unknown>);
-  addMessage(ctx.tenantId, ctx.conv.id, { direction: "out", sender: "bot", body: text, meta: clean({ ...meta, lang: ctx.lang, escalated: false }) });
+  const data = getData();
+  await data.conversations.setState(ctx.tenantId, ctx.conv.id, state as Record<string, unknown>);
+  await data.messages.add(ctx.tenantId, ctx.conv.id, { direction: "out", sender: "bot", body: text, meta: clean({ ...meta, lang: ctx.lang, escalated: false }) });
   return { text, escalated: false };
 }
 
@@ -342,9 +342,10 @@ async function escalate(
   state.greeted = true;
   state.botTurns = (state.botTurns ?? 0) + 1;
   if (state.order) { delete state.order.email; delete state.order.stage; }
-  setConversationState(ctx.tenantId, ctx.conv.id, state as Record<string, unknown>);
-  setConversationStatus(ctx.tenantId, ctx.conv.id, "needs_human", reason);
-  addMessage(ctx.tenantId, ctx.conv.id, {
+  const data = getData();
+  await data.conversations.setState(ctx.tenantId, ctx.conv.id, state as Record<string, unknown>);
+  await data.conversations.setStatus(ctx.tenantId, ctx.conv.id, "needs_human", reason);
+  await data.messages.add(ctx.tenantId, ctx.conv.id, {
     direction: "out", sender: "bot", body: text,
     meta: clean({ ...meta, lang: ctx.lang, escalated: true, escalationReason: reason, outsideHours: open === false || undefined }),
   });

@@ -5,6 +5,7 @@ import { shopifyConnector } from "../shopify/connector";
 const ORDERS_CONNECTORS: OrdersConnector[] = [shopifyConnector];
 
 /** First connected orders connector for the tenant, or null if the tenant has no commerce add-on. */
-export function getOrdersConnector(tenantId: string): OrdersConnector | null {
-  return ORDERS_CONNECTORS.find((c) => c.isConnected(tenantId)) ?? null;
+export async function getOrdersConnector(tenantId: string): Promise<OrdersConnector | null> {
+  for (const c of ORDERS_CONNECTORS) if (await c.isConnected(tenantId)) return c;
+  return null;
 }

@@ -1,6 +1,6 @@
-// SQLite (node:sqlite, built into Node 24) for the on-prem build.
-// PROD NOTE: all SQL lives in src/lib/store.ts and per-module repos that call getDb().
-// To move to Supabase/Postgres, replace this file and those repos; keep tenant_id on every table.
+// SQLite (node:sqlite, built into Node 24) for the on-prem build: connection, schema and additive migrations.
+// All SQL lives in the SQLite DataStore (src/lib/data/sqlite/**). App code goes through getData() (src/lib/data),
+// never through getDb(): a test (src/lib/data/__tests__/boundary.test.ts) enforces it.
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
@@ -95,7 +95,7 @@ const INDEXES: { name: string; sql: string }[] = [
   { name: "idx_conv_tenant_last", sql: "CREATE INDEX IF NOT EXISTS idx_conv_tenant_last ON conversations(tenant_id, last_message_at)" },
   { name: "idx_audit_tenant", sql: "CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log(tenant_id, created_at)" },
   // M7: two tenants can never both have the same CONNECTED Page / IG / WhatsApp id.
-  // saveChannelAccount throws "UNIQUE constraint failed" if another tenant already owns it (callers should catch it).
+  // getData().channels.save turns the "UNIQUE constraint failed" error into DataConflictError (callers catch it).
   {
     name: "uq_channel_external",
     sql: `CREATE UNIQUE INDEX IF NOT EXISTS uq_channel_external ON channel_accounts(channel, json_extract(public_info, '$.externalId'))
@@ -114,6 +114,8 @@ function addColumnIfMissing(db: DatabaseSync, table: string, column: string, ddl
  * Additive, idempotent migrations for databases created by older builds. Never drops or rewrites data.
  * - context_sections.mode ('text' | 'file') + file_source_id (the section's file is a normal `sources` row).
  * - section_sources: Data sources linked to a context section ("Complementar con fuentes de datos").
+ * - engine limiter + login/rate-limit tables (formerly created lazily by their modules).
+ * - brand_settings and ai_usage (same shape as the Supabase schema in supabase/migrations).
  */
 export function runMigrations(db: DatabaseSync): void {
   const steps: [string, () => void][] = [
@@ -126,6 +128,43 @@ export function runMigrations(db: DatabaseSync): void {
         PRIMARY KEY (tenant_id, section_key, source_id)
       );
       CREATE INDEX IF NOT EXISTS idx_section_sources_source ON section_sources(tenant_id, source_id);
+    `)],
+    ["engine_limiter", () => db.exec(`
+      CREATE TABLE IF NOT EXISTS engine_lookup_failures (
+        tenant_id TEXT NOT NULL, order_hash TEXT NOT NULL, email_hash TEXT NOT NULL, at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_elf_tenant_at ON engine_lookup_failures(tenant_id, at);
+      CREATE INDEX IF NOT EXISTS idx_elf_order ON engine_lookup_failures(tenant_id, order_hash, at);
+      CREATE INDEX IF NOT EXISTS idx_elf_email ON engine_lookup_failures(tenant_id, email_hash, at);
+      CREATE TABLE IF NOT EXISTS engine_inbound_log (
+        tenant_id TEXT NOT NULL, conversation_id TEXT NOT NULL, at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_eil_conv ON engine_inbound_log(tenant_id, conversation_id, at);
+    `)],
+    ["rate_limits", () => db.exec(`
+      CREATE TABLE IF NOT EXISTS rate_limits (
+        key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, count INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS login_attempts (
+        key TEXT NOT NULL, at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_login_attempts ON login_attempts(key, at);
+    `)],
+    ["brand_settings", () => db.exec(`
+      CREATE TABLE IF NOT EXISTS brand_settings (
+        tenant_id TEXT PRIMARY KEY, display_name TEXT NOT NULL DEFAULT '', logo_path TEXT,
+        primary_color TEXT NOT NULL DEFAULT '#0F766E', accent_color TEXT NOT NULL DEFAULT '#14181F',
+        menu_bg_color TEXT NOT NULL DEFAULT '#F6F7F9', heading_font TEXT NOT NULL DEFAULT 'system',
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `)],
+    ["ai_usage", () => db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_usage (
+        tenant_id TEXT NOT NULL, period TEXT NOT NULL,
+        requests INTEGER NOT NULL DEFAULT 0, input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (tenant_id, period)
+      );
     `)],
   ];
   for (const [name, run] of steps) {

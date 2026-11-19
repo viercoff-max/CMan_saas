@@ -8,15 +8,15 @@ import { serializeBusinessHours, parseBusinessHours as parseToneHours, DEFAULT_H
 import { formatBusinessHours, isOpenNow, parseBusinessHours } from "@/lib/engine/escalate";
 import { saveToneAction } from "@/app/(app)/tone/actions";
 import { handleInbound } from "@/lib/engine";
-import { getAgentSettings, getOrCreateConversation, listMessages } from "@/lib/store";
 import { asUser, newTenant, seedContext } from "./helpers";
+import { getData } from "@/lib/data";
 
 const TZ = "America/Mexico_City"; // UTC-6 all year (no DST since 2022)
 /** Local Mexico City wall time -> Date */
 const mx = (isoLocal: string) => new Date(`${isoLocal}-06:00`);
 const engineOpen = (h: ToneHours, at: Date) => isOpenNow(parseBusinessHours(serializeBusinessHours(h)), at);
 
-afterEach(() => asUser(null));
+afterEach(async () => asUser(null));
 
 describe("scenario 6: serializeBusinessHours (Tone) is understood by the engine", () => {
   const monFri: ToneHours = { fromDay: 1, toDay: 5, open: "09:00", close: "18:00", timezone: TZ };
@@ -34,7 +34,7 @@ describe("scenario 6: serializeBusinessHours (Tone) is understood by the engine"
     expect(engineOpen(monFri, mx(local))).toBe(expected);
   });
 
-  it("uses the tenant timezone, not the server's (Mon 20:00 UTC = 14:00 CDMX open; Tue 01:00 UTC = Mon 19:00 CDMX closed)", () => {
+  it("uses the tenant timezone, not the server's (Mon 20:00 UTC = 14:00 CDMX open; Tue 01:00 UTC = Mon 19:00 CDMX closed)", async () => {
     expect(engineOpen(monFri, new Date("2026-10-05T20:00:00Z"))).toBe(true);
     expect(engineOpen(monFri, new Date("2026-10-06T01:00:00Z"))).toBe(false);
     const tijuana: ToneHours = { ...monFri, timezone: "America/Tijuana" }; // UTC-7 in October (DST)
@@ -42,7 +42,7 @@ describe("scenario 6: serializeBusinessHours (Tone) is understood by the engine"
     expect(engineOpen(tijuana, new Date("2026-10-05T16:30:00Z"))).toBe(true);
   });
 
-  it("wrap-around week (Sat..Tue) and single day (Sun only)", () => {
+  it("wrap-around week (Sat..Tue) and single day (Sun only)", async () => {
     const satTue: ToneHours = { fromDay: 6, toDay: 2, open: "10:00", close: "14:00", timezone: TZ };
     expect(engineOpen(satTue, mx("2026-10-10T11:00:00"))).toBe(true); // Sat
     expect(engineOpen(satTue, mx("2026-10-11T11:00:00"))).toBe(true); // Sun
@@ -53,16 +53,16 @@ describe("scenario 6: serializeBusinessHours (Tone) is understood by the engine"
     expect(engineOpen(sun, mx("2026-10-12T10:00:00"))).toBe(false);
   });
 
-  it("round trip: the Tone screen reloads what it saved; engine summary text is human readable", () => {
+  it("round trip: the Tone screen reloads what it saved; engine summary text is human readable", async () => {
     expect(parseToneHours(serializeBusinessHours(monFri))).toEqual(monFri);
     expect(formatBusinessHours(parseBusinessHours(serializeBusinessHours(monFri)), "es")).toBe("lun–vie 9:00–18:00");
     expect(formatBusinessHours(parseBusinessHours(serializeBusinessHours(monFri)), "en")).toBe("Mon–Fri 9:00–18:00");
     expect(formatBusinessHours(parseBusinessHours(serializeBusinessHours({ ...monFri, fromDay: 6, toDay: 2 })), "es")).toBe("lun–mar 9:00–18:00, sáb–dom 9:00–18:00");
   });
 
-  it("fresh tenant (DB default '{}') -> engine treats hours as unknown, while the Tone screen shows Mon–Fri 9–18", () => {
-    const t = newTenant();
-    const raw = getAgentSettings(t.tenantId).businessHours;
+  it("fresh tenant (DB default '{}') -> engine treats hours as unknown, while the Tone screen shows Mon–Fri 9–18", async () => {
+    const t = await newTenant();
+    const raw = (await getData().settings.get(t.tenantId)).businessHours;
     expect(raw).toBe("{}");
     expect(parseToneHours(raw)).toEqual(DEFAULT_HOURS);
     expect(parseBusinessHours(raw).configured).toBe(false);
@@ -71,7 +71,7 @@ describe("scenario 6: serializeBusinessHours (Tone) is understood by the engine"
     expect(hoursAreSaved(serializeBusinessHours(DEFAULT_HOURS))).toBe(true);
   });
 
-  it("BUG-3 (fixed): hours that close at/after midnight (20:00–02:00, 09:00–00:00) are understood by the engine", () => {
+  it("BUG-3 (fixed): hours that close at/after midnight (20:00–02:00, 09:00–00:00) are understood by the engine", async () => {
     const late: ToneHours = { fromDay: 1, toDay: 5, open: "20:00", close: "02:00", timezone: TZ };
     expect(parseBusinessHours(serializeBusinessHours(late)).configured).toBe(true);
     expect(engineOpen(late, mx("2026-10-05T19:59:00"))).toBe(false); // Mon before opening
@@ -89,19 +89,19 @@ describe("scenario 6: serializeBusinessHours (Tone) is understood by the engine"
   });
 
   it("BUG-3 (fixed): the Tone action accepts an overnight range and rejects open == close", async () => {
-    const t = newTenant();
+    const t = await newTenant();
     asUser(t);
     const base = { agentName: "Chefi", toneLevel: 3, languageDefault: "es", greeting: "", fallbackMessage: "", handoffEmail: "", crossSellLevel: 0 };
     expect((await saveToneAction({ ...base, hours: { fromDay: 1, toDay: 5, open: "20:00", close: "02:00", timezone: TZ } })).ok).toBe(true);
-    expect(parseBusinessHours(getAgentSettings(t.tenantId).businessHours).configured).toBe(true);
+    expect(parseBusinessHours((await getData().settings.get(t.tenantId)).businessHours).configured).toBe(true);
     expect((await saveToneAction({ ...base, hours: { fromDay: 1, toDay: 5, open: "09:00", close: "09:00", timezone: TZ } })).ok).toBe(false);
   });
 });
 
 describe("scenario 7: saved business hours drive the handoff wording", () => {
   async function tenantWithTone(over: Partial<{ toneLevel: number; languageDefault: "es" | "en" }> = {}) {
-    const t = newTenant();
-    seedContext(t.tenantId);
+    const t = await newTenant();
+    await seedContext(t.tenantId);
     asUser(t);
     const res = await saveToneAction({
       agentName: "Chefi", toneLevel: over.toneLevel ?? 3, languageDefault: over.languageDefault ?? "es", greeting: "", fallbackMessage: "",
@@ -122,7 +122,7 @@ describe("scenario 7: saved business hours drive the handoff wording", () => {
     expect(r).toMatchObject({ escalated: true, reason: "human_request" });
     expect(r.text).toMatch(/fuera de nuestro horario de atención \(lun–vie 9:00–18:00\)/);
     expect(r.text).toMatch(/te responderá por este medio en cuanto abramos/);
-    const last = listMessages(t.tenantId, getOrCreateConversation(t.tenantId, "simulator", `h-${k}`).id).at(-1)!;
+    const last = (await getData().messages.list(t.tenantId, (await getData().conversations.getOrCreate(t.tenantId, "simulator", `h-${k}`)).id)).at(-1)!;
     expect(last.meta.outsideHours).toBe(true);
   });
 

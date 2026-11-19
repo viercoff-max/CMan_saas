@@ -2,14 +2,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireSession } from "@/lib/auth";
-import { audit, createSource, getContextSections, saveContextSection } from "@/lib/store";
+import { getData } from "@/lib/data";
 import { CONTEXT_SECTION_KEYS, type ContextSectionKey } from "@/lib/types";
 import { indexSource, reindexSection } from "@/lib/context";
 import { deleteSourceAndLinks, restoreGeneralSourceChunks } from "@/lib/context/section-index";
-import {
-  getSectionMeta, linkSectionSource, listSectionMeta, listSectionSourceIds, sectionFileSourceIds, setSectionMode,
-  sourceBelongsToTenant, unlinkSectionSource,
-} from "@/lib/context/section-repo";
+import { getSectionMeta, listSectionMeta, listSectionSourceIds, sectionFileSourceIds } from "@/lib/context/section-repo";
 import { hit } from "@/lib/security/rate-limit";
 
 const sectionKey = z.enum(CONTEXT_SECTION_KEYS);
@@ -28,8 +25,9 @@ export async function saveContextAction(input: unknown): Promise<SaveContextResu
   const s = await requireSession();
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, changed: 0 };
-  const current = new Map(getContextSections(s.tenantId).map((c) => [c.key, c.content]));
-  const meta = listSectionMeta(s.tenantId);
+  const data = getData();
+  const current = new Map((await data.sections.list(s.tenantId)).map((c) => [c.key, c.content]));
+  const meta = await listSectionMeta(s.tenantId);
   let changed = 0;
   for (const k of CONTEXT_SECTION_KEYS) {
     const content = parsed.data.sections[k];
@@ -38,12 +36,12 @@ export async function saveContextAction(input: unknown): Promise<SaveContextResu
     const modeChanged = mode !== undefined && meta[k].mode !== mode;
     if (!textChanged && !modeChanged) continue;
     // The typed text is always kept (it is the draft while the file mode is on).
-    if (textChanged) saveContextSection(s.tenantId, k, content!);
-    if (modeChanged) setSectionMode(s.tenantId, k, mode!);
-    reindexSection(s.tenantId, k);
+    if (textChanged) await data.sections.saveContent(s.tenantId, k, content!);
+    if (modeChanged) await data.sections.setMode(s.tenantId, k, mode!);
+    await reindexSection(s.tenantId, k);
     changed++;
   }
-  if (changed) audit(s.tenantId, s.userId, "context.save", `${changed} sections`);
+  if (changed) await data.audit.log(s.tenantId, s.userId, "context.save", `${changed} sections`);
   return { ok: true, changed };
 }
 
@@ -52,11 +50,12 @@ export async function removeSectionFileAction(input: unknown): Promise<SectionAc
   const s = await requireSession();
   const p = z.object({ key: sectionKey }).safeParse(input);
   if (!p.success) return { ok: false, error: "invalid" };
-  const fileId = getSectionMeta(s.tenantId, p.data.key).fileSourceId;
+  const data = getData();
+  const fileId = (await getSectionMeta(s.tenantId, p.data.key)).fileSourceId;
   if (fileId) await deleteSourceAndLinks(s.tenantId, fileId); // also sets mode 'text' and re-indexes the section
-  setSectionMode(s.tenantId, p.data.key, "text");
-  reindexSection(s.tenantId, p.data.key);
-  audit(s.tenantId, s.userId, "context.section_file_remove", p.data.key);
+  await data.sections.setMode(s.tenantId, p.data.key, "text");
+  await reindexSection(s.tenantId, p.data.key);
+  await data.audit.log(s.tenantId, s.userId, "context.section_file_remove", p.data.key);
   revalidatePath("/context");
   return { ok: true };
 }
@@ -67,16 +66,17 @@ export async function setSectionSourceAction(input: unknown): Promise<SectionAct
   const p = z.object({ key: sectionKey, sourceId: z.uuid(), linked: z.boolean() }).safeParse(input);
   if (!p.success) return { ok: false, error: "invalid" };
   const { key, sourceId, linked } = p.data;
-  if (!sourceBelongsToTenant(s.tenantId, sourceId) || sectionFileSourceIds(s.tenantId).has(sourceId)) return { ok: false, error: "not_found" };
+  const data = getData();
+  if (!(await data.sources.exists(s.tenantId, sourceId)) || (await sectionFileSourceIds(s.tenantId)).has(sourceId)) return { ok: false, error: "not_found" };
   if (linked) {
-    if (!listSectionSourceIds(s.tenantId, key).includes(sourceId)) linkSectionSource(s.tenantId, key, sourceId);
-    reindexSection(s.tenantId, key);
+    if (!(await listSectionSourceIds(s.tenantId, key)).includes(sourceId)) await data.sections.link(s.tenantId, key, sourceId);
+    await reindexSection(s.tenantId, key);
   } else {
-    unlinkSectionSource(s.tenantId, key, sourceId);
-    reindexSection(s.tenantId, key);
-    restoreGeneralSourceChunks(s.tenantId, sourceId); // back to general knowledge when no section uses it
+    await data.sections.unlink(s.tenantId, key, sourceId);
+    await reindexSection(s.tenantId, key);
+    await restoreGeneralSourceChunks(s.tenantId, sourceId); // back to general knowledge when no section uses it
   }
-  audit(s.tenantId, s.userId, linked ? "context.link_source" : "context.unlink_source", `${key} ${sourceId}`);
+  await data.audit.log(s.tenantId, s.userId, linked ? "context.link_source" : "context.unlink_source", `${key} ${sourceId}`);
   revalidatePath("/context");
   return { ok: true };
 }
@@ -93,12 +93,13 @@ export async function addSectionLinkAction(input: unknown): Promise<SectionActio
   const s = await requireSession();
   const p = linkSchema.safeParse(input);
   if (!p.success) return { ok: false, error: "invalid_url" };
-  if (!hit(`section-link:${s.tenantId}`, 30, 60 * 60_000).ok) return { ok: false, error: "rate_limited" };
+  if (!(await hit(`section-link:${s.tenantId}`, 30, 60 * 60_000)).ok) return { ok: false, error: "rate_limited" };
   const url = new URL(p.data.url);
   const title = (url.hostname + (url.pathname !== "/" ? url.pathname : "")).slice(0, 120);
-  const src = createSource(s.tenantId, { kind: "link", title, url: url.toString() });
-  linkSectionSource(s.tenantId, p.data.key as ContextSectionKey, src.id);
-  audit(s.tenantId, s.userId, "source.add", `link ${src.id} section ${p.data.key}`);
+  const data = getData();
+  const src = await data.sources.create(s.tenantId, { kind: "link", title, url: url.toString() });
+  await data.sections.link(s.tenantId, p.data.key as ContextSectionKey, src.id);
+  await data.audit.log(s.tenantId, s.userId, "source.add", `link ${src.id} section ${p.data.key}`);
   const r = await indexSource(s.tenantId, src.id); // the section is re-indexed by the indexing hook
   revalidatePath("/context");
   revalidatePath("/sources");

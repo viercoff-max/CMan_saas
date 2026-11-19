@@ -3,10 +3,10 @@
 // as a normal `sources` row so extraction and indexing are shared, and the section switches to file mode.
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
-import { audit, createSource } from "@/lib/store";
+import { getData } from "@/lib/data";
 import { indexSource } from "@/lib/context/index-source";
 import { deleteSourceAndLinks } from "@/lib/context/section-index";
-import { getSectionMeta, getSourceText, isSectionKey, PREVIEW_CHARS, setSectionFile, setSectionMode } from "@/lib/context/section-repo";
+import { getSectionMeta, isSectionKey, PREVIEW_CHARS } from "@/lib/context/section-repo";
 import { readValidatedUpload, storeUpload } from "@/lib/context/upload";
 import { checkSameOrigin } from "@/lib/security/origin";
 import { limitOr429 } from "@/lib/security/rate-limit";
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   let session;
   try { session = await requireSession(); } catch (e) { if (e instanceof Response) return e; throw e; }
   // Shares the upload budget with the Sources screen.
-  const limited = limitOr429(`upload:${session.tenantId}`, 30, 60 * 60_000); if (limited) return limited;
+  const limited = await limitOr429(`upload:${session.tenantId}`, 30, 60 * 60_000); if (limited) return limited;
 
   const up = await readValidatedUpload(req);
   if (up instanceof Response) return up;
@@ -28,16 +28,17 @@ export async function POST(req: Request) {
   const rel = await storeUpload(session.tenantId, up.original, up.bytes);
   if (!rel) return NextResponse.json({ error: "bad_type" }, { status: 400 });
 
-  const previous = getSectionMeta(session.tenantId, key).fileSourceId;
-  const src = createSource(session.tenantId, { kind: "file", title: up.original, filePath: rel });
+  const data = getData();
+  const previous = (await getSectionMeta(session.tenantId, key)).fileSourceId;
+  const src = await data.sources.create(session.tenantId, { kind: "file", title: up.original, filePath: rel });
   // Attach first so indexing chunks it as part of the section (never as a general source).
-  setSectionFile(session.tenantId, key, src.id);
-  setSectionMode(session.tenantId, key, "file");
+  await data.sections.setFile(session.tenantId, key, src.id);
+  await data.sections.setMode(session.tenantId, key, "file");
   if (previous && previous !== src.id) await deleteSourceAndLinks(session.tenantId, previous);
   const r = await indexSource(session.tenantId, src.id);
-  audit(session.tenantId, session.userId, "context.section_file", `${key} ${src.id}`);
+  await data.audit.log(session.tenantId, session.userId, "context.section_file", `${key} ${src.id}`);
 
-  const text = getSourceText(session.tenantId, src.id)?.text ?? "";
+  const text = (await data.sources.getText(session.tenantId, src.id))?.text ?? "";
   return NextResponse.json({
     ok: true, id: src.id, name: up.original, size: up.size, indexed: r.ok, error: r.error,
     preview: r.ok ? text.slice(0, PREVIEW_CHARS) : "",

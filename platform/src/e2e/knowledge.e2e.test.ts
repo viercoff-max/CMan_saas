@@ -3,25 +3,25 @@ import { DATA_DIR } from "./setup";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { handleInbound } from "@/lib/engine";
-import { getConversation, getOrCreateConversation, listChunks, listMessages } from "@/lib/store";
 import type { Channel } from "@/lib/types";
 import { faithfulLLM, newTenant, outboxFilesFor, readOutbox, seedContext } from "./helpers";
+import { getData } from "@/lib/data";
 
 let tenantId: string;
 let ext: string;
 let n = 0;
 const ev = (text: string, channel: Channel = "whatsapp") => ({ tenantId, channel, externalId: ext, customerName: "Juan Pérez", text, providerMessageId: `kn-${++n}` });
-const conv = (channel: Channel = "whatsapp") => getOrCreateConversation(tenantId, channel, ext);
+const conv = async (channel: Channel = "whatsapp") => await getData().conversations.getOrCreate(tenantId, channel, ext);
 
-beforeEach(() => {
-  tenantId = newTenant().tenantId;
+beforeEach(async () => {
+  tenantId = (await newTenant()).tenantId;
   ext = `cust-${++n}`;
-  seedContext(tenantId);
+  await seedContext(tenantId);
 });
 
 describe("scenario 1: answers come from the tenant's saved context", () => {
-  it("context save + reindex produces chunks the engine can retrieve", () => {
-    const chunks = listChunks(tenantId);
+  it("context save + reindex produces chunks the engine can retrieve", async () => {
+    const chunks = await getData().chunks.list(tenantId);
     expect(chunks.some((c) => c.sectionKey === "warranty" && /1 año/.test(c.text))).toBe(true);
     expect(chunks.some((c) => c.sectionKey === "products" && /Licuadora/.test(c.title))).toBe(true);
   });
@@ -41,8 +41,8 @@ describe("scenario 1: answers come from the tenant's saved context", () => {
     expect(r.text).toMatch(/garantía de 1 año contra defectos de fábrica/);
     // every sentence of the reply after the greeting exists verbatim in the tenant context
     const answer = r.text.replace(/^.*?(Todos)/, "$1").split("\n\n")[0];
-    expect(listChunks(tenantId).some((c) => c.text.includes(answer))).toBe(true);
-    const bot = listMessages(tenantId, conv().id).at(-1)!;
+    expect((await getData().chunks.list(tenantId)).some((c) => c.text.includes(answer))).toBe(true);
+    const bot = (await getData().messages.list(tenantId, (await conv()).id)).at(-1)!;
     expect(bot.sender).toBe("bot");
     expect(bot.meta.sources).toEqual(req.sources.map((s) => s.id));
   });
@@ -74,7 +74,7 @@ describe("scenario 1: answers come from the tenant's saved context", () => {
     const r2 = await handleInbound(ev("¿Tienen estacionamiento para bicicletas?"), { llm });
     expect(r2).toMatchObject({ escalated: true, reason: "no_answer" });
     expect(calls).toHaveLength(0);
-    const c = getConversation(tenantId, conv().id)!;
+    const c = (await getData().conversations.get(tenantId, (await conv()).id))!;
     expect(c.status).toBe("needs_human");
     expect(c.escalationReason).toBe("no_answer");
     // real notifyHandoff (not injected) wrote an email-like file
@@ -92,7 +92,7 @@ describe("scenario 1: answers come from the tenant's saved context", () => {
 
   it("BUG-1 (fixed): handoff outbox is written under DATA_DIR (not process.cwd()/data)", async () => {
     await handleInbound(ev("quiero hablar con una persona"));
-    expect(outboxFilesFor(conv().id, path.join(DATA_DIR, "outbox"))).toHaveLength(1);
+    expect(outboxFilesFor((await conv()).id, path.join(DATA_DIR, "outbox"))).toHaveLength(1);
   });
 
   it("offline fallback through defaultLLM (no OPENAI_API_KEY) still answers from context", async () => {
@@ -109,7 +109,7 @@ describe("scenario 3: deterministic escalations and language", () => {
     expect(r.text).toMatch(/desconéctalo/);
     expect(r.text).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
     expect(calls).toHaveLength(0);
-    const c = getConversation(tenantId, conv().id)!;
+    const c = (await getData().conversations.get(tenantId, (await conv()).id))!;
     expect([c.status, c.escalationReason]).toEqual(["needs_human", "safety"]);
     expect(readOutbox(c.id)).toMatch(/Subject: \[URGENTE\]/);
   });
@@ -122,8 +122,8 @@ describe("scenario 3: deterministic escalations and language", () => {
   it("legal: PROFECO / abogado escalate with reason legal", async () => {
     const r = await handleInbound(ev("Si no me responden voy a ir a PROFECO con mi abogado"));
     expect(r).toMatchObject({ escalated: true, reason: "legal" });
-    expect(getConversation(tenantId, conv().id)!.escalationReason).toBe("legal");
-    expect(readOutbox(conv().id)).toMatch(/\[URGENTE\]/);
+    expect((await getData().conversations.get(tenantId, (await conv()).id))!.escalationReason).toBe("legal");
+    expect(readOutbox((await conv()).id)).toMatch(/\[URGENTE\]/);
   });
 
   it("human_request: 'quiero hablar con una persona'", async () => {
@@ -137,7 +137,7 @@ describe("scenario 3: deterministic escalations and language", () => {
     const r1 = await handleInbound(ev("Hi, how long is the warranty?"), { llm });
     expect(calls[0].lang).toBe("en");
     expect(r1.text).toMatch(/^Hi, I'm /);
-    expect(conv().state.lang).toBe("en");
+    expect((await conv()).state.lang).toBe("en");
     const r2 = await handleInbound(ev("I want to talk to a human please"), { llm });
     expect(r2).toMatchObject({ escalated: true, reason: "human_request" });
     expect(r2.text).toMatch(/I'll connect you with someone from our team/);

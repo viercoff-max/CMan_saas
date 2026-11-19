@@ -9,6 +9,12 @@ import { loadApp } from "./lib/bootstrap.mjs";
 
 const KEEP = 14;
 const { DATA_DIR } = await loadApp("lib/db.ts");
+// SQLite file backup only. With DATA_BACKEND=supabase use Supabase's own backups / pg_dump instead.
+const backend = (process.env.DATA_BACKEND ?? "").trim().toLowerCase();
+if (backend && backend !== "sqlite") {
+  console.error("[backup] DATA_BACKEND is not sqlite: this script only backs up the local SQLite file.");
+  process.exit(2);
+}
 const dest = path.resolve(process.argv[2] || path.join(DATA_DIR, "..", "backups"));
 fs.mkdirSync(dest, { recursive: true });
 const src = path.join(DATA_DIR, "app.db");

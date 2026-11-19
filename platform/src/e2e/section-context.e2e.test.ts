@@ -12,15 +12,13 @@ import { POST as sectionFilePOST } from "@/app/api/context/section-file/route";
 import { removeSectionFileAction, saveContextAction, setSectionSourceAction } from "@/app/(app)/context/actions";
 import { deleteSourceAction } from "@/app/(app)/sources/actions";
 import { runMigrations, UPLOAD_DIR } from "@/lib/db";
-import { createSource, getSource, listChunks, listSources, replaceChunks, saveContextSection, updateSourceStatus } from "@/lib/store";
 import { chunkText, indexSource, reindexSection } from "@/lib/context";
-import {
-  ALWAYS_ON_CAP, getEffectiveSectionContent, getSectionMeta, isSectionFilled, listSectionLinks, sectionFileSourceIds, TRUNCATION_NOTE,
-} from "@/lib/context/section-repo";
+import { ALWAYS_ON_CAP, getEffectiveSectionContent, getSectionMeta, isSectionFilled, sectionFileSourceIds, TRUNCATION_NOTE } from "@/lib/context/section-repo";
 import { resolveUploadPath } from "@/lib/context/upload-path";
 import { handleInbound } from "@/lib/engine";
 import { CONTEXT_SECTION_KEYS, type ContextSectionKey } from "@/lib/types";
 import { asUser, faithfulLLM, newTenant, seedContext, type TestTenant } from "./helpers";
+import { getData } from "@/lib/data";
 
 /** The Context screen always posts ALL sections. */
 const all = (over: Partial<Record<ContextSectionKey, string>>) =>
@@ -47,22 +45,22 @@ async function upload(section: string, name: string, content: string, type = "te
   const res = await sectionFilePOST(await uploadReq(section, name, content, { type }));
   return { status: res.status, body: (await res.json()) as { ok?: boolean; id?: string; indexed?: boolean; error?: string; preview?: string; name?: string; size?: number } };
 }
-const sectionChunks = (tenantId: string, key: string) => listChunks(tenantId).filter((c) => c.sectionKey === key);
+const sectionChunks = async (tenantId: string, key: string) => (await getData().chunks.list(tenantId)).filter((c) => c.sectionKey === key);
 
 /** An indexed link source, the same way the demo seed / Sources screen leaves it (general chunks). */
-function indexedLink(tenantId: string, title: string, text: string) {
-  const s = createSource(tenantId, { kind: "link", title, url: `https://example.com/${encodeURIComponent(title)}` });
-  updateSourceStatus(tenantId, s.id, "indexed", undefined, text);
-  replaceChunks(tenantId, { sourceId: s.id }, chunkText(text, title));
+async function indexedLink(tenantId: string, title: string, text: string) {
+  const s = await getData().sources.create(tenantId, { kind: "link", title, url: `https://example.com/${encodeURIComponent(title)}` });
+  await getData().sources.updateStatus(tenantId, s.id, "indexed", undefined, text);
+  await getData().chunks.replace(tenantId, { sourceId: s.id }, chunkText(text, title));
   return s.id;
 }
 
 let T: TestTenant;
 let n = 0;
-beforeEach(() => { T = newTenant(); asUser(T); });
+beforeEach(async () => { T = await newTenant(); asUser(T); });
 
 describe("migration", () => {
-  it("is additive and idempotent on a DB created by an older build", () => {
+  it("is additive and idempotent on a DB created by an older build", async () => {
     const file = path.join(ROOT, `old-${Date.now()}.db`);
     const db = new DatabaseSync(file);
     db.exec(`CREATE TABLE context_sections (
@@ -90,48 +88,48 @@ describe("Usar un archivo", () => {
     expect(up.body.preview).toMatch(/^Archivo oficial/);
     const fileId = up.body.id!;
 
-    let eff = getEffectiveSectionContent(T.tenantId, "warranty");
+    let eff = await getEffectiveSectionContent(T.tenantId, "warranty");
     expect(eff).toMatchObject({ mode: "file", using: "file", fileFailed: false });
     expect(eff.text).toMatch(/2 años/);
     expect(eff.typed).toBe("Texto escrito: garantía de 1 año."); // kept as a draft
-    let chunks = sectionChunks(T.tenantId, "warranty");
+    let chunks = await sectionChunks(T.tenantId, "warranty");
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.every((c) => /2 años/.test(c.text) && c.sourceId === fileId)).toBe(true);
-    expect(listChunks(T.tenantId).some((c) => /1 año\./.test(c.text))).toBe(false);
+    expect((await getData().chunks.list(T.tenantId)).some((c) => /1 año\./.test(c.text))).toBe(false);
     // the section file is not a general source (no section-less chunks, hidden from the Sources list)
-    expect(listChunks(T.tenantId).some((c) => c.sourceId === fileId && c.sectionKey === null)).toBe(false);
-    expect(sectionFileSourceIds(T.tenantId).has(fileId)).toBe(true);
+    expect((await getData().chunks.list(T.tenantId)).some((c) => c.sourceId === fileId && c.sectionKey === null)).toBe(false);
+    expect((await sectionFileSourceIds(T.tenantId)).has(fileId)).toBe(true);
 
     // back to "Escribir"
     await saveContextAction({ sections: all({ warranty: "Texto escrito: garantía de 1 año." }), modes: { warranty: "text" } });
-    eff = getEffectiveSectionContent(T.tenantId, "warranty");
+    eff = await getEffectiveSectionContent(T.tenantId, "warranty");
     expect(eff).toMatchObject({ mode: "text", using: "text" });
     expect(eff.text).toBe("Texto escrito: garantía de 1 año.");
-    chunks = sectionChunks(T.tenantId, "warranty");
+    chunks = await sectionChunks(T.tenantId, "warranty");
     expect(chunks.every((c) => /1 año/.test(c.text) && c.sourceId === null)).toBe(true);
-    expect(listChunks(T.tenantId).some((c) => /2 años/.test(c.text))).toBe(false);
-    expect(getSectionMeta(T.tenantId, "warranty").fileSourceId).toBe(fileId); // file kept, just not used
+    expect((await getData().chunks.list(T.tenantId)).some((c) => /2 años/.test(c.text))).toBe(false);
+    expect((await getSectionMeta(T.tenantId, "warranty")).fileSourceId).toBe(fileId); // file kept, just not used
 
     // and to the file again without re-uploading
     expect((await saveContextAction({ sections: all({ warranty: "Texto escrito: garantía de 1 año." }), modes: { warranty: "file" } })).changed).toBe(1);
-    expect(getEffectiveSectionContent(T.tenantId, "warranty").using).toBe("file");
+    expect((await getEffectiveSectionContent(T.tenantId, "warranty")).using).toBe("file");
   });
 
   it("Reemplazar deletes the previous file; Quitar goes back to the typed text", async () => {
     await saveContextAction({ sections: all({ faq: "¿Lavavajillas? Sí." }) });
     const a = await upload("faq", "faq1.txt", "Primera versión del archivo de preguntas.");
-    const oldPath = resolveUploadPath(T.tenantId, getSource(T.tenantId, a.body.id!)!.filePath!)!;
+    const oldPath = resolveUploadPath(T.tenantId, (await getData().sources.get(T.tenantId, a.body.id!))!.filePath!)!;
     expect(fs.existsSync(oldPath)).toBe(true);
     const b = await upload("faq", "faq2.md", "Segunda versión: el vaso es de vidrio.", "text/markdown");
-    expect(getSource(T.tenantId, a.body.id!)).toBeNull();
+    expect(await getData().sources.get(T.tenantId, a.body.id!)).toBeNull();
     expect(fs.existsSync(oldPath)).toBe(false);
-    expect(sectionChunks(T.tenantId, "faq").every((c) => c.sourceId === b.body.id && /Segunda/.test(c.text))).toBe(true);
+    expect((await sectionChunks(T.tenantId, "faq")).every((c) => c.sourceId === b.body.id && /Segunda/.test(c.text))).toBe(true);
 
     expect(await removeSectionFileAction({ key: "faq" })).toEqual({ ok: true });
-    expect(getSource(T.tenantId, b.body.id!)).toBeNull();
-    expect(getSectionMeta(T.tenantId, "faq")).toEqual({ mode: "text", fileSourceId: null });
-    expect(sectionChunks(T.tenantId, "faq").map((c) => c.text).join(" ")).toMatch(/Lavavajillas/);
-    expect(listChunks(T.tenantId).some((c) => c.sourceId === b.body.id)).toBe(false);
+    expect(await getData().sources.get(T.tenantId, b.body.id!)).toBeNull();
+    expect(await getSectionMeta(T.tenantId, "faq")).toEqual({ mode: "text", fileSourceId: null });
+    expect((await sectionChunks(T.tenantId, "faq")).map((c) => c.text).join(" ")).toMatch(/Lavavajillas/);
+    expect((await getData().chunks.list(T.tenantId)).some((c) => c.sourceId === b.body.id)).toBe(false);
   });
 
   it("a file that fails to index falls back to the typed text and is flagged", async () => {
@@ -139,18 +137,18 @@ describe("Usar un archivo", () => {
     const up = await upload("shipping_returns", "vacio.txt", "   \n   ");
     expect(up.status).toBe(200);
     expect(up.body).toMatchObject({ ok: true, indexed: false, error: "empty", preview: "" });
-    const eff = getEffectiveSectionContent(T.tenantId, "shipping_returns");
+    const eff = await getEffectiveSectionContent(T.tenantId, "shipping_returns");
     expect(eff).toMatchObject({ mode: "file", using: "text", fileFailed: true });
     expect(eff.file?.status).toBe("error");
     expect(eff.text).toBe("Envíos en 3 a 5 días.");
-    expect(sectionChunks(T.tenantId, "shipping_returns").map((c) => c.text).join(" ")).toMatch(/3 a 5 días/);
+    expect((await sectionChunks(T.tenantId, "shipping_returns")).map((c) => c.text).join(" ")).toMatch(/3 a 5 días/);
   });
 
   it("the completeness meter counts a section filled by a file only", async () => {
-    expect(isSectionFilled(getEffectiveSectionContent(T.tenantId, "products"), 21)).toBe(false);
+    expect(isSectionFilled(await getEffectiveSectionContent(T.tenantId, "products"), 21)).toBe(false);
     await upload("products", "productos.csv", "modelo,potencia\nFreidora 5L,1700 W\nLicuadora,1200 W", "text/csv");
-    expect(getEffectiveSectionContent(T.tenantId, "products").typed).toBe("");
-    expect(isSectionFilled(getEffectiveSectionContent(T.tenantId, "products"), 21)).toBe(true);
+    expect((await getEffectiveSectionContent(T.tenantId, "products")).typed).toBe("");
+    expect(isSectionFilled(await getEffectiveSectionContent(T.tenantId, "products"), 21)).toBe(true);
   });
 });
 
@@ -166,34 +164,34 @@ describe("upload route guardrails", () => {
     asUser(null);
     expect((await bad(await uploadReq("faq", "ok.txt", "hola"))).status).toBe(401);
     asUser(T);
-    expect(listSources(T.tenantId)).toHaveLength(0);
-    expect(getSectionMeta(T.tenantId, "faq")).toEqual({ mode: "text", fileSourceId: null });
+    expect(await getData().sources.list(T.tenantId)).toHaveLength(0);
+    expect(await getSectionMeta(T.tenantId, "faq")).toEqual({ mode: "text", fileSourceId: null });
     expect(fs.existsSync(path.join(UPLOAD_DIR, T.tenantId)) ? fs.readdirSync(path.join(UPLOAD_DIR, T.tenantId)) : []).toHaveLength(0);
   });
 });
 
 describe("Complementar con fuentes de datos", () => {
   it("linked source chunks carry the sectionKey (and sourceId), go back to general on unlink, and vanish with the source", async () => {
-    seedContext(T.tenantId);
-    const id = indexedLink(T.tenantId, "Manual freidora", "La canasta de la freidora se lava con agua tibia y jabón neutro.");
+    await seedContext(T.tenantId);
+    const id = await indexedLink(T.tenantId, "Manual freidora", "La canasta de la freidora se lava con agua tibia y jabón neutro.");
     expect(await setSectionSourceAction({ key: "products", sourceId: id, linked: true })).toEqual({ ok: true });
-    let mine = listChunks(T.tenantId).filter((c) => c.sourceId === id);
+    let mine = (await getData().chunks.list(T.tenantId)).filter((c) => c.sourceId === id);
     expect(mine.length).toBeGreaterThan(0);
     expect(mine.every((c) => c.sectionKey === "products")).toBe(true);
-    expect(sectionChunks(T.tenantId, "products").some((c) => c.sourceId === null && /Licuadora/.test(`${c.title} ${c.text}`))).toBe(true); // own text kept
+    expect((await sectionChunks(T.tenantId, "products")).some((c) => c.sourceId === null && /Licuadora/.test(`${c.title} ${c.text}`))).toBe(true); // own text kept
 
     await setSectionSourceAction({ key: "products", sourceId: id, linked: false });
-    mine = listChunks(T.tenantId).filter((c) => c.sourceId === id);
+    mine = (await getData().chunks.list(T.tenantId)).filter((c) => c.sourceId === id);
     expect(mine.length).toBeGreaterThan(0);
     expect(mine.every((c) => c.sectionKey === null)).toBe(true);
 
     await setSectionSourceAction({ key: "products", sourceId: id, linked: true });
     await setSectionSourceAction({ key: "faq", sourceId: id, linked: true });
-    expect(new Set(listChunks(T.tenantId).filter((c) => c.sourceId === id).map((c) => c.sectionKey))).toEqual(new Set(["products", "faq"]));
+    expect(new Set((await getData().chunks.list(T.tenantId)).filter((c) => c.sourceId === id).map((c) => c.sectionKey))).toEqual(new Set(["products", "faq"]));
     expect(await deleteSourceAction({ id })).toEqual({ ok: true });
-    expect(listChunks(T.tenantId).some((c) => c.sourceId === id)).toBe(false);
-    expect(listSectionLinks(T.tenantId)).toEqual([]);
-    expect(sectionChunks(T.tenantId, "products").some((c) => /Licuadora/.test(`${c.title} ${c.text}`))).toBe(true);
+    expect((await getData().chunks.list(T.tenantId)).some((c) => c.sourceId === id)).toBe(false);
+    expect(await getData().sections.listLinks(T.tenantId)).toEqual([]);
+    expect((await sectionChunks(T.tenantId, "products")).some((c) => /Licuadora/.test(`${c.title} ${c.text}`))).toBe(true);
   });
 
   it("re-syncing a linked source refreshes that section's chunks", async () => {
@@ -201,13 +199,13 @@ describe("Complementar con fuentes de datos", () => {
     const full = path.join(UPLOAD_DIR, rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, "Versión uno del catálogo.");
-    const src = createSource(T.tenantId, { kind: "file", title: "catalogo.txt", filePath: rel });
+    const src = await getData().sources.create(T.tenantId, { kind: "file", title: "catalogo.txt", filePath: rel });
     await indexSource(T.tenantId, src.id);
     await setSectionSourceAction({ key: "products", sourceId: src.id, linked: true });
-    expect(sectionChunks(T.tenantId, "products").map((c) => c.text).join(" ")).toMatch(/Versión uno/);
+    expect((await sectionChunks(T.tenantId, "products")).map((c) => c.text).join(" ")).toMatch(/Versión uno/);
     fs.writeFileSync(full, "Versión dos del catálogo con horno.");
     await indexSource(T.tenantId, src.id);
-    const texts = listChunks(T.tenantId).filter((c) => c.sourceId === src.id);
+    const texts = (await getData().chunks.list(T.tenantId)).filter((c) => c.sourceId === src.id);
     expect(texts.every((c) => c.sectionKey === "products" && /Versión dos/.test(c.text))).toBe(true);
   });
 });
@@ -221,8 +219,8 @@ describe("always-on sections reach the engine prompt", () => {
   };
 
   it("a source linked to dos_donts is in the system prompt (not in retrieved sources)", async () => {
-    seedContext(T.tenantId);
-    const id = indexedLink(T.tenantId, "Reglas de marca", "Nunca menciones a la competencia ZetaCorp.");
+    await seedContext(T.tenantId);
+    const id = await indexedLink(T.tenantId, "Reglas de marca", "Nunca menciones a la competencia ZetaCorp.");
     await setSectionSourceAction({ key: "dos_donts", sourceId: id, linked: true });
     const req = await ask(T.tenantId);
     expect(req.system).toMatch(/Nunca prometas descuentos/);
@@ -231,11 +229,11 @@ describe("always-on sections reach the engine prompt", () => {
   });
 
   it("caps always-on content and marks the truncation", async () => {
-    seedContext(T.tenantId);
+    await seedContext(T.tenantId);
     const big = `${"Regla larga de escalamiento. ".repeat(1200)}MARCADOR-FINAL`;
-    const id = indexedLink(T.tenantId, "Manual de escalamiento", big);
+    const id = await indexedLink(T.tenantId, "Manual de escalamiento", big);
     await setSectionSourceAction({ key: "escalation", sourceId: id, linked: true });
-    const eff = getEffectiveSectionContent(T.tenantId, "escalation");
+    const eff = await getEffectiveSectionContent(T.tenantId, "escalation");
     expect(eff.truncated).toBe(true);
     expect(eff.text.length).toBeLessThanOrEqual(ALWAYS_ON_CAP + TRUNCATION_NOTE.length + 1);
     const req = await ask(T.tenantId);
@@ -244,7 +242,7 @@ describe("always-on sections reach the engine prompt", () => {
   });
 
   it("file mode on an always-on section uses the file; a failed file falls back to the typed text", async () => {
-    seedContext(T.tenantId);
+    await seedContext(T.tenantId);
     await upload("escalation", "escalar.txt", "ARCHIVO-ESCALA: pasar con una persona si piden factura.");
     let req = await ask(T.tenantId);
     expect(req.system).toMatch(/ARCHIVO-ESCALA/);
@@ -252,7 +250,7 @@ describe("always-on sections reach the engine prompt", () => {
 
     await upload("dos_donts", "reglas.txt", "  \n ");
     req = await ask(T.tenantId);
-    expect(getEffectiveSectionContent(T.tenantId, "dos_donts").fileFailed).toBe(true);
+    expect((await getEffectiveSectionContent(T.tenantId, "dos_donts")).fileFailed).toBe(true);
     expect(req.system).toMatch(/Nunca prometas descuentos/);
   });
 });
@@ -260,26 +258,26 @@ describe("always-on sections reach the engine prompt", () => {
 describe("tenant isolation", () => {
   it("another tenant cannot link, delete or see a tenant's sources and section files", async () => {
     const A = T;
-    seedContext(A.tenantId);
-    const srcA = indexedLink(A.tenantId, "Fuente A", "Información privada de la marca A.");
+    await seedContext(A.tenantId);
+    const srcA = await indexedLink(A.tenantId, "Fuente A", "Información privada de la marca A.");
     await setSectionSourceAction({ key: "faq", sourceId: srcA, linked: true });
     const fileA = await upload("warranty", "garantia-a.txt", "Garantía secreta de A: 5 años.");
 
-    const B = newTenant("Otra marca");
+    const B = await newTenant("Otra marca");
     asUser(B);
     expect(await setSectionSourceAction({ key: "faq", sourceId: srcA, linked: true })).toEqual({ ok: false, error: "not_found" });
     expect(await deleteSourceAction({ id: srcA })).toEqual({ ok: false, error: "not_found" });
     expect(await removeSectionFileAction({ key: "warranty" })).toEqual({ ok: true }); // B has no file: no-op for A
-    saveContextSection(B.tenantId, "warranty", "Garantía de B");
-    reindexSection(B.tenantId, "warranty");
-    expect(getEffectiveSectionContent(B.tenantId, "warranty").text).toBe("Garantía de B");
-    expect(getEffectiveSectionContent(B.tenantId, "faq").linked).toEqual([]);
-    expect(listChunks(B.tenantId).some((c) => /privada|secreta/.test(c.text))).toBe(false);
+    await getData().sections.saveContent(B.tenantId, "warranty", "Garantía de B");
+    await reindexSection(B.tenantId, "warranty");
+    expect((await getEffectiveSectionContent(B.tenantId, "warranty")).text).toBe("Garantía de B");
+    expect((await getEffectiveSectionContent(B.tenantId, "faq")).linked).toEqual([]);
+    expect((await getData().chunks.list(B.tenantId)).some((c) => /privada|secreta/.test(c.text))).toBe(false);
 
     // A is untouched
-    expect(listSectionLinks(A.tenantId)).toEqual([{ sectionKey: "faq", sourceId: srcA }]);
-    expect(getEffectiveSectionContent(A.tenantId, "warranty")).toMatchObject({ using: "file" });
-    expect(getEffectiveSectionContent(A.tenantId, "warranty").file?.id).toBe(fileA.body.id);
+    expect(await getData().sections.listLinks(A.tenantId)).toEqual([{ sectionKey: "faq", sourceId: srcA }]);
+    expect(await getEffectiveSectionContent(A.tenantId, "warranty")).toMatchObject({ using: "file" });
+    expect((await getEffectiveSectionContent(A.tenantId, "warranty")).file?.id).toBe(fileA.body.id);
     expect(fs.existsSync(DATA_DIR)).toBe(true);
   });
 });

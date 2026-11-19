@@ -1,7 +1,7 @@
 // Shared domain types. This file is the CONTRACT between modules; change with care.
 
-export type Channel = "whatsapp" | "instagram" | "messenger" | "simulator";
-export const CHANNELS: Channel[] = ["whatsapp", "instagram", "messenger", "simulator"];
+export type Channel = "telegram" | "whatsapp" | "instagram" | "messenger" | "simulator";
+export const CHANNELS: Channel[] = ["telegram", "whatsapp", "instagram", "messenger", "simulator"];
 
 export type ConversationStatus = "bot" | "needs_human" | "human" | "resolved";
 export type Sender = "customer" | "bot" | "agent";
@@ -53,6 +53,8 @@ export interface Conversation {
 export interface Message {
   id: string; conversationId: string; tenantId: string; direction: "in" | "out";
   sender: Sender; body: string; meta: Record<string, unknown>; createdAt: string;
+  /** Channel message id (inbound dedupe). Supabase: messages.provider_message_id; SQLite: meta.providerMessageId. */
+  providerMessageId?: string | null;
 }
 
 export type AddonKey = "shopify";
@@ -78,7 +80,7 @@ export interface OrderStatusResult {
 }
 export interface OrdersConnector {
   key: AddonKey;
-  isConnected(tenantId: string): boolean;
+  isConnected(tenantId: string): boolean | Promise<boolean>;
   /** Must match order number AND email exactly (case-insensitive email). Generic failure otherwise. */
   lookupOrderStatus(tenantId: string, orderNumber: string, email: string): Promise<OrderStatusResult>;
 }

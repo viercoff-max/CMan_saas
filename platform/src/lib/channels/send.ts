@@ -9,9 +9,8 @@
 // - Instagram via a Facebook Page token: POST {FB_GRAPH}/me/messages (me = the Page), text <= 1000 (we count UTF-8 bytes).
 // - Instagram via Instagram Login token ("IG..."): POST {IG_GRAPH}/{ig-id}/messages, text <= 1000 UTF-8 bytes.
 import type { Conversation } from "../types";
-import { getChannelAccount, getChannelSecrets } from "../store";
+import { getData } from "../data";
 import { FB_GRAPH, IG_GRAPH, isInstagramLoginToken } from "./graph";
-import { lastInboundAt } from "./repo";
 
 const TIMEOUT_MS = 10_000;
 const HOUR = 60 * 60 * 1000;
@@ -119,13 +118,14 @@ export async function sendToCustomer(tenantId: string, conv: Conversation, text:
     const parts = splitMessage(text, limit.max, limit.unit);
     if (parts.length === 0) return { ok: false, error: "empty_message" };
 
-    const account = getChannelAccount(tenantId, ch);
+    const data = getData();
+    const account = await data.channels.get(tenantId, ch);
     if (account.status !== "connected") return { ok: false, error: "channel_not_connected" };
-    const secrets = getChannelSecrets<Record<string, string>>(tenantId, ch);
+    const secrets = await data.secrets.get<Record<string, string>>(tenantId, "channel", ch);
     const token = secrets?.accessToken;
     if (!token) return { ok: false, error: "missing_token" };
 
-    const win = windowDecision(ch, lastInboundAt(tenantId, conv.id), Date.now(), process.env.META_HUMAN_AGENT === "1");
+    const win = windowDecision(ch, await data.messages.lastInboundAt(tenantId, conv.id), Date.now(), process.env.META_HUMAN_AGENT === "1");
     if (!win.ok) return { ok: false, error: win.error };
     const externalId = String(account.publicInfo.externalId ?? "");
 

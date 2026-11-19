@@ -2,30 +2,33 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { getLocale, makeT } from "@/lib/i18n";
 import { shellDict } from "@/lib/shell-dict";
-import { countConversationsByStatus, getAddon, getChannelAccount, listSources } from "@/lib/store";
+import { getData } from "@/lib/data";
 import { getEffectiveSectionContent, isSectionFilled } from "@/lib/context/section-repo";
 import { CONTEXT_SECTION_KEYS } from "@/lib/types";
 import { Badge, Card, LinkButton, PageHeader } from "@/components/ui";
-import { isToneSaved } from "@/lib/context/tone-saved";
 
 export default async function Dashboard() {
   const s = await getSession();
   if (!s) redirect("/login");
   const t = makeT(shellDict, await getLocale());
   // A section counts whether it uses typed text or an uploaded file (or linked Data sources).
-  const ctxDone = CONTEXT_SECTION_KEYS.some((k) => isSectionFilled(getEffectiveSectionContent(s.tenantId, k), 21));
-  const srcDone = listSources(s.tenantId).some((x) => x.status === "indexed");
-  const chDone = (["whatsapp", "instagram", "messenger"] as const).some((c) => getChannelAccount(s.tenantId, c).status === "connected");
-  const shopDone = getAddon(s.tenantId, "shopify").status === "connected";
-  const counts = countConversationsByStatus(s.tenantId);
+  const data = getData();
+  const effective = await Promise.all(CONTEXT_SECTION_KEYS.map((k) => getEffectiveSectionContent(s.tenantId, k)));
+  const ctxDone = effective.some((e) => isSectionFilled(e, 21));
+  const srcDone = (await data.sources.list(s.tenantId)).some((x) => x.status === "indexed");
+  const chDone = (await Promise.all((["whatsapp", "instagram", "messenger"] as const).map((c) => data.channels.get(s.tenantId, c))))
+    .some((a) => a.status === "connected");
+  const addon = await data.addons.get(s.tenantId, "shopify");
+  const shopDone = addon.status === "connected";
+  const counts = await data.conversations.countByStatus(s.tenantId);
+  const toneSaved = await data.settings.isToneSaved(s.tenantId);
 
-  const addon = getAddon(s.tenantId, "shopify");
   const demo = shopDone && addon.publicInfo.mock === true;
   const tested = counts.bot + counts.human + counts.resolved + counts.needs_human > 0;
   // Testing the simulator comes before connecting real channels.
   const steps = [
     { href: "/context", label: t("dash.step.context"), done: ctxDone, optional: false },
-    { href: "/tone", label: t("dash.step.tone"), done: isToneSaved(s.tenantId), optional: false },
+    { href: "/tone", label: t("dash.step.tone"), done: toneSaved, optional: false },
     { href: "/sources", label: t("dash.step.sources"), done: srcDone, optional: false },
     { href: "/inbox?simulator=1", label: t("dash.step.test"), done: tested, optional: false },
     { href: "/channels", label: t("dash.step.channels"), done: chDone, optional: false },

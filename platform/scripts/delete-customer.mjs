@@ -22,12 +22,12 @@ if (!["messenger", "instagram", "whatsapp", "simulator"].includes(channel ?? "")
 const { deleteCustomerData, exportCustomerData } = await loadApp("lib/retention/index.ts");
 
 if (exportFile || exportOnly) {
-  const data = exportCustomerData(tenantId, channel, externalId, { actor: "cli" });
+  const data = await exportCustomerData(tenantId, channel, externalId, { actor: "cli" });
   const out = exportFile ?? `export-${channel}-${Date.now()}.json`;
   fs.writeFileSync(out, JSON.stringify(data, null, 2), "utf8");
   console.log(`Exported ${data.conversations.length} conversation(s) to ${out}. Send it to the customer and then delete the file.`);
   if (exportOnly) process.exit(0);
 }
-const r = deleteCustomerData(tenantId, channel, externalId, { force, actor: "cli" });
+const r = await deleteCustomerData(tenantId, channel, externalId, { force, actor: "cli" });
 console.log(`Deleted ${r.conversations} conversation(s), ${r.messages} message(s), ${r.outboxFiles} outbox file(s). Reference: ${r.ref}`);
 if (r.heldConversations) console.log(`${r.heldConversations} conversation(s) kept on legal hold (safety/legal). Re-run with --force only if the owner approves.`);

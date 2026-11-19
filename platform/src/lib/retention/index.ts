@@ -3,8 +3,9 @@
 // NOTE: relative imports only (no "@/"), so the CLI scripts in scripts/ can load this file with Node's type stripping.
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, OUTBOX_DIR } from "../db";
-import { audit } from "../store";
+import { OUTBOX_DIR } from "../db";
+import { getData } from "../data";
+import type { CustomerConversation } from "../data/types";
 import { hashKey, purgeSecurityRows } from "../security/rate-limit";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -56,14 +57,6 @@ function deleteOutboxFor(convIds: string[], extraNeedles: string[] = []): number
   return n;
 }
 
-function tenantIds(): string[] {
-  const rows = getDb().prepare("SELECT id FROM tenants UNION SELECT DISTINCT tenant_id AS id FROM conversations").all() as { id: string }[];
-  return rows.map((r) => r.id);
-}
-// COALESCE everywhere: a NULL here would make "NOT hold" NULL and silently skip the row.
-const HOLD_SQL = `(COALESCE(escalation_reason, '') IN ('safety','legal')
-  OR COALESCE(CASE WHEN json_valid(state) THEN json_extract(state, '$.legalHold') END, 0) = 1)`;
-
 export type PurgeResult = {
   tenants: number; messagesDeleted: number; conversationsDeleted: number; messagesMasked: number;
   outboxFilesDeleted: number; securityRowsDeleted: number; retentionDays: number;
@@ -75,49 +68,21 @@ export type PurgeResult = {
  * Also removes outbox files older than OUTBOX_RETENTION_DAYS (30) and expired login/rate-limit rows.
  * Without tenantId: every tenant + global folders/tables.
  */
-export function purgeOldData(tenantId?: string, now: Date = new Date()): PurgeResult {
-  const db = getDb();
+export async function purgeOldData(tenantId?: string, now: Date = new Date()): Promise<PurgeResult> {
+  const data = getData();
   const days = retentionDays();
   const cutoff = new Date(now.getTime() - days * DAY_MS).toISOString();
   const maskCutoff = new Date(now.getTime() - legalHoldMaskDays() * DAY_MS).toISOString();
   const res: PurgeResult = { tenants: 0, messagesDeleted: 0, conversationsDeleted: 0, messagesMasked: 0, outboxFilesDeleted: 0, securityRowsDeleted: 0, retentionDays: days };
 
-  for (const t of tenantId ? [tenantId] : tenantIds()) {
+  for (const t of tenantId ? [tenantId] : await data.retention.tenantIds()) {
     res.tenants++;
-    let msgs = 0, convs = 0, masked = 0;
-    let goneConvIds: string[] = [];
-    db.exec("BEGIN");
-    try {
-      // 1) Old messages in conversations without legal hold (julianday() copes with both ISO and SQLite datetime formats).
-      msgs = Number(db.prepare(
-        `DELETE FROM messages WHERE tenant_id = ? AND julianday(created_at) < julianday(?)
-         AND conversation_id NOT IN (SELECT id FROM conversations WHERE tenant_id = ? AND ${HOLD_SQL})`,
-      ).run(t, cutoff, t).changes);
-      // 2) Conversations idle longer than the window (and their leftover messages).
-      goneConvIds = (db.prepare(
-        `SELECT id FROM conversations WHERE tenant_id = ? AND julianday(last_message_at) < julianday(?) AND NOT ${HOLD_SQL}`,
-      ).all(t, cutoff) as { id: string }[]).map((r) => r.id);
-      const delMsgs = db.prepare("DELETE FROM messages WHERE tenant_id = ? AND conversation_id = ?");
-      const delConv = db.prepare("DELETE FROM conversations WHERE tenant_id = ? AND id = ?");
-      for (const id of goneConvIds) {
-        msgs += Number(delMsgs.run(t, id).changes);
-        convs += Number(delConv.run(t, id).changes);
-      }
-      // 3) Legal hold: keep the record, mask the text after the hold-mask window.
-      masked = Number(db.prepare(
-        `UPDATE messages SET body = ?, meta = json_set(CASE WHEN json_valid(meta) THEN meta ELSE '{}' END, '$.masked', 1)
-         WHERE tenant_id = ? AND body <> ? AND julianday(created_at) < julianday(?)
-         AND conversation_id IN (SELECT id FROM conversations WHERE tenant_id = ? AND ${HOLD_SQL})`,
-      ).run(MASKED_BODY, t, MASKED_BODY, maskCutoff, t).changes);
-      db.exec("COMMIT");
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
-    }
-    const files = deleteOutboxFor(goneConvIds);
+    const p = await data.retention.purgeTenant(t, { cutoff, maskCutoff, maskedBody: MASKED_BODY });
+    const msgs = p.messagesDeleted, convs = p.conversationsDeleted, masked = p.messagesMasked;
+    const files = deleteOutboxFor(p.deletedConversationIds);
     res.messagesDeleted += msgs; res.conversationsDeleted += convs; res.messagesMasked += masked; res.outboxFilesDeleted += files;
     if (msgs || convs || masked || files)
-      audit(t, "system", "retention.purge", JSON.stringify({ days, messages: msgs, conversations: convs, masked, outbox: files }));
+      await data.audit.log(t, "system", "retention.purge", JSON.stringify({ days, messages: msgs, conversations: convs, masked, outbox: files }));
   }
 
   if (!tenantId) {
@@ -125,22 +90,14 @@ export function purgeOldData(tenantId?: string, now: Date = new Date()): PurgeRe
     for (const f of listOutbox()) {
       try { if (fs.statSync(f).mtimeMs < limit && rm(f)) res.outboxFilesDeleted++; } catch { /* ignore */ }
     }
-    res.securityRowsDeleted = purgeSecurityRows(now.getTime());
+    res.securityRowsDeleted = await purgeSecurityRows(now.getTime());
   }
   return res;
 }
 
 // ---------- per-customer rights (ARCO / Meta / Shopify) ----------
-type ConvRow = {
-  id: string; channel: string; external_id: string; customer_name: string; status: string;
-  escalation_reason: string | null; state: string; created_at: string; last_message_at: string;
-};
-function findConversations(tenantId: string, channel: string, externalId: string): ConvRow[] {
-  return getDb().prepare("SELECT * FROM conversations WHERE tenant_id = ? AND channel = ? AND external_id = ?")
-    .all(tenantId, channel, externalId) as ConvRow[];
-}
-const isHeld = (c: ConvRow) => {
-  if (c.escalation_reason && (LEGAL_HOLD_REASONS as readonly string[]).includes(c.escalation_reason)) return true;
+const isHeld = (c: CustomerConversation) => {
+  if (c.escalationReason && (LEGAL_HOLD_REASONS as readonly string[]).includes(c.escalationReason)) return true;
   try { const h = JSON.parse(c.state || "{}").legalHold; return h === 1 || h === true; } catch { return false; }
 };
 
@@ -151,26 +108,15 @@ export type DeleteResult = { conversations: number; messages: number; outboxFile
  * Conversations on legal hold are NOT deleted unless `force` (report them as heldConversations so a person decides;
  * LFPDPPP allows keeping data needed for legal claims). Writes an audit row with a hashed reference only.
  */
-export function deleteCustomerData(tenantId: string, channel: string, externalId: string, opts: { force?: boolean; actor?: string } = {}): DeleteResult {
-  const db = getDb();
+export async function deleteCustomerData(tenantId: string, channel: string, externalId: string, opts: { force?: boolean; actor?: string } = {}): Promise<DeleteResult> {
+  const data = getData();
   const ref = hashKey("customer", `${tenantId}|${channel}|${externalId}`);
-  const convs = findConversations(tenantId, channel, externalId);
+  const convs = await data.retention.findCustomerConversations(tenantId, channel, externalId);
   const held = convs.filter((c) => !opts.force && isHeld(c));
   const del = convs.filter((c) => opts.force || !isHeld(c));
-  let messages = 0, conversations = 0;
-  db.exec("BEGIN");
-  try {
-    for (const c of del) {
-      messages += Number(db.prepare("DELETE FROM messages WHERE tenant_id = ? AND conversation_id = ?").run(tenantId, c.id).changes);
-      conversations += Number(db.prepare("DELETE FROM conversations WHERE tenant_id = ? AND id = ?").run(tenantId, c.id).changes);
-    }
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
+  const { messages, conversations } = await data.retention.deleteConversations(tenantId, del.map((c) => c.id));
   const outboxFiles = deleteOutboxFor(del.map((c) => c.id), del.length ? [externalId] : []);
-  audit(tenantId, opts.actor ?? "system", "privacy.customer_deleted",
+  await data.audit.log(tenantId, opts.actor ?? "system", "privacy.customer_deleted",
     JSON.stringify({ ref, channel, conversations, messages, outbox: outboxFiles, held: held.length, forced: !!opts.force }));
   return { conversations, messages, outboxFiles, heldConversations: held.length, ref };
 }
@@ -184,20 +130,18 @@ export type CustomerExport = {
 };
 
 /** Everything we hold about one customer identity, as plain JSON (ARCO acceso / Shopify customers/data_request). */
-export function exportCustomerData(tenantId: string, channel: string, externalId: string, opts: { actor?: string; now?: Date } = {}): CustomerExport {
-  const db = getDb();
-  const convs = findConversations(tenantId, channel, externalId);
+export async function exportCustomerData(tenantId: string, channel: string, externalId: string, opts: { actor?: string; now?: Date } = {}): Promise<CustomerExport> {
+  const data = getData();
+  const convs = await data.retention.findCustomerConversations(tenantId, channel, externalId);
   const out: CustomerExport = {
     exportedAt: (opts.now ?? new Date()).toISOString(), tenantId, channel, externalId,
-    conversations: convs.map((c) => ({
-      id: c.id, customerName: c.customer_name, status: c.status, escalationReason: c.escalation_reason,
-      createdAt: c.created_at, lastMessageAt: c.last_message_at,
-      messages: (db.prepare("SELECT direction, sender, body, created_at FROM messages WHERE tenant_id = ? AND conversation_id = ? ORDER BY created_at ASC")
-        .all(tenantId, c.id) as { direction: string; sender: string; body: string; created_at: string }[])
-        .map((m) => ({ direction: m.direction, sender: m.sender, body: m.body, createdAt: m.created_at })),
-    })),
+    conversations: await Promise.all(convs.map(async (c) => ({
+      id: c.id, customerName: c.customerName, status: c.status, escalationReason: c.escalationReason,
+      createdAt: c.createdAt, lastMessageAt: c.lastMessageAt,
+      messages: await data.retention.exportMessages(tenantId, c.id),
+    }))),
   };
-  audit(tenantId, opts.actor ?? "system", "privacy.customer_exported",
+  await data.audit.log(tenantId, opts.actor ?? "system", "privacy.customer_exported",
     JSON.stringify({ ref: hashKey("customer", `${tenantId}|${channel}|${externalId}`), channel, conversations: convs.length }));
   return out;
 }

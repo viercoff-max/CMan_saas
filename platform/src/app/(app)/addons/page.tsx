@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { getAddon, getChannelAccount } from "@/lib/store";
+import { getData } from "@/lib/data";
 import { getLocale, makeT } from "@/lib/i18n";
 import { PageHeader } from "@/components/ui";
 import { oauthConfigured } from "@/lib/shopify/config";
@@ -13,7 +13,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
   const locale = await getLocale();
   const t = makeT(dict, locale);
   const { notice } = await searchParams;
-  const addon = getAddon(session.tenantId, "shopify");
+  const data = getData();
+  const addon = await data.addons.get(session.tenantId, "shopify");
+  const channelsConnected = (await Promise.all((["whatsapp", "instagram", "messenger"] as const).map((c) => data.channels.get(session.tenantId, c))))
+    .some((a) => a.status === "connected");
   const noticeKey = notice === "shopify_connected" || notice === "shopify_error" ? `notice.${notice}` : null;
 
   return (
@@ -28,7 +31,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
           mock: addon.publicInfo.mock === true,
         }}
         oauth={oauthConfigured()}
-        channelsConnected={(["whatsapp", "instagram", "messenger"] as const).some((c) => getChannelAccount(session.tenantId, c).status === "connected")}
+        channelsConnected={channelsConnected}
         notice={noticeKey ? { text: t(noticeKey), ok: notice === "shopify_connected" } : null}
       />
     </>

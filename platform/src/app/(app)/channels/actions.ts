@@ -2,8 +2,7 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth";
-import { audit, findTenantByChannelExternalId, saveChannelAccount } from "@/lib/store";
-import { clearChannelSecrets } from "@/lib/channels/repo";
+import { DataConflictError, getData } from "@/lib/data";
 import { testChannelCredentials, type GraphFailure } from "./graph-test";
 
 const id = z.string().trim().min(3).max(64).regex(/^[A-Za-z0-9_.-]+$/);
@@ -32,15 +31,16 @@ export async function connectChannel(channel: string, input: unknown): Promise<C
 
   // One Page / IG account / WhatsApp number belongs to ONE brand (webhook routing). Checked before calling Graph, and the
   // unique index uq_channel_external (db.ts) is the race-proof backstop below.
-  const owner = findTenantByChannelExternalId(channel, d.externalId);
+  const data = getData();
+  const owner = await data.channels.findTenantByExternalId(channel, d.externalId);
   if (owner && owner !== s.tenantId) {
-    audit(s.tenantId, s.userId, "channel.connect_failed", `${channel}:in_use`);
+    await data.audit.log(s.tenantId, s.userId, "channel.connect_failed", `${channel}:in_use`);
     return { ok: false, error: "in_use" };
   }
 
   const test = await testChannelCredentials(channel, d);
   if (!test.ok) {
-    audit(s.tenantId, s.userId, "channel.connect_failed", `${channel}:${test.error}`);
+    await data.audit.log(s.tenantId, s.userId, "channel.connect_failed", `${channel}:${test.error}`);
     return { ok: false, error: test.error };
   }
 
@@ -50,17 +50,19 @@ export async function connectChannel(channel: string, input: unknown): Promise<C
       ? { igId: d.externalId, accessToken: d.accessToken, ...(test.igLogin ? { igLogin: "1" } : {}) }
       : { pageId: d.externalId, accessToken: d.accessToken };
   try {
-    saveChannelAccount(s.tenantId, channel, {
-      status: "connected", secrets, publicInfo: { externalId: d.externalId, displayName: test.name },
+    // Status first: a conflict (another tenant owns this account) must not leave our token stored.
+    await data.channels.save(s.tenantId, channel, {
+      status: "connected", publicInfo: { externalId: d.externalId, displayName: test.name },
     });
   } catch (e) {
-    if (e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) {
-      audit(s.tenantId, s.userId, "channel.connect_failed", `${channel}:in_use`);
+    if (e instanceof DataConflictError) {
+      await data.audit.log(s.tenantId, s.userId, "channel.connect_failed", `${channel}:in_use`);
       return { ok: false, error: "in_use" };
     }
     throw e;
   }
-  audit(s.tenantId, s.userId, "channel.connect", channel);
+  await data.secrets.set(s.tenantId, "channel", channel, secrets);
+  await data.audit.log(s.tenantId, s.userId, "channel.connect", channel);
   revalidatePath("/channels");
   return { ok: true, name: test.name };
 }
@@ -68,9 +70,10 @@ export async function connectChannel(channel: string, input: unknown): Promise<C
 export async function disconnectChannel(channel: string): Promise<{ ok: boolean }> {
   const s = await getSession();
   if (!s || !isCh(channel)) return { ok: false };
-  saveChannelAccount(s.tenantId, channel, { status: "disconnected", publicInfo: {} });
-  clearChannelSecrets(s.tenantId, channel);
-  audit(s.tenantId, s.userId, "channel.disconnect", channel);
+  const data = getData();
+  await data.channels.save(s.tenantId, channel, { status: "disconnected", publicInfo: {} });
+  await data.secrets.clear(s.tenantId, "channel", channel);
+  await data.audit.log(s.tenantId, s.userId, "channel.disconnect", channel);
   revalidatePath("/channels");
   return { ok: true };
 }

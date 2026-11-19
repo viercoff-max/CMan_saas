@@ -5,9 +5,7 @@
 //   POST https://{shop}/admin/oauth/access_token  (application/x-www-form-urlencoded)
 //   grant_type=client_credentials&client_id=...&client_secret=...  ->  { access_token, scope, expires_in: 86399 }
 // The token lives 24 h, so it is renewed here automatically. Never logs secrets.
-import { getDb } from "../db";
-import { encryptJson } from "../crypto";
-import { getAddonSecrets } from "../store";
+import { getData } from "../data";
 
 export interface ShopifySecrets {
   shop: string;
@@ -46,9 +44,9 @@ export async function fetchClientCredentialsToken(shop: string, clientId: string
   }
 }
 
-/** Rewrites only the encrypted secrets (store.saveAddon would also reset connected_at). */
-function persist(tenantId: string, s: ShopifySecrets) {
-  getDb().prepare("UPDATE addons SET config_enc=? WHERE tenant_id=? AND key='shopify'").run(encryptJson(s), tenantId);
+/** Rewrites only the encrypted secrets (addons.save would also reset connected_at). */
+function persist(tenantId: string, s: ShopifySecrets): Promise<void> {
+  return getData().secrets.set(tenantId, "addon", "shopify", s);
 }
 
 export const needsRefresh = (s: ShopifySecrets, now = Date.now()) =>
@@ -59,7 +57,7 @@ export const needsRefresh = (s: ShopifySecrets, now = Date.now()) =>
  * Returns null when not configured or the renewal failed.
  */
 export async function getShopifySecrets(tenantId: string, opts: { force?: boolean; fetch?: Fetch } = {}): Promise<ShopifySecrets | null> {
-  const s = getAddonSecrets<ShopifySecrets>(tenantId, "shopify");
+  const s = await getData().secrets.get<ShopifySecrets>(tenantId, "addon", "shopify");
   if (!s?.shop) return null;
   if (s.grant !== "client_credentials") return s.accessToken ? s : null;
   if (!opts.force && !needsRefresh(s)) return s;
@@ -67,6 +65,6 @@ export async function getShopifySecrets(tenantId: string, opts: { force?: boolea
   const r = await fetchClientCredentialsToken(s.shop, s.clientId, s.clientSecret, opts.fetch);
   if (!r.ok) return null;
   const next: ShopifySecrets = { ...s, accessToken: r.accessToken, scopes: r.scopes || s.scopes, expiresAt: r.expiresAt };
-  persist(tenantId, next);
+  await persist(tenantId, next);
   return next;
 }

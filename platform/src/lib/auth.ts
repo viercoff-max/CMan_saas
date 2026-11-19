@@ -2,8 +2,7 @@ import { cookies } from "next/headers";
 import { scrypt as scryptCb, scryptSync, randomBytes } from "node:crypto";
 import { promisify } from "node:util";
 import { sign, safeEqual } from "./crypto";
-import { getDb } from "./db";
-import { audit } from "./store";
+import { getData } from "./data";
 import {
   hashKey, recordLoginFailure, countLoginFailures, clearLoginFailures,
   LOGIN_MAX_FAILS_PER_EMAIL, LOGIN_MAX_FAILS_PER_IP,
@@ -48,24 +47,24 @@ export async function login(email: string, password: string, ip = "unknown"): Pr
   const normEmail = email.trim().toLowerCase().slice(0, 320);
   const emailKey = hashKey("login-email", normEmail);
   const ipKey = hashKey("login-ip", ip);
-  const locked = countLoginFailures(emailKey) >= LOGIN_MAX_FAILS_PER_EMAIL || countLoginFailures(ipKey) >= LOGIN_MAX_FAILS_PER_IP;
+  const locked = (await countLoginFailures(emailKey)) >= LOGIN_MAX_FAILS_PER_EMAIL || (await countLoginFailures(ipKey)) >= LOGIN_MAX_FAILS_PER_IP;
 
-  const row = getDb().prepare("SELECT id, tenant_id, password_hash FROM users WHERE email = ?").get(normEmail) as
-    | { id: string; tenant_id: string; password_hash: string } | undefined;
-  const valid = await verifyPassword(String(password).slice(0, 1024), row && !locked ? row.password_hash : DUMMY_HASH);
+  const data = getData();
+  const row = await data.users.findLoginByEmail(normEmail);
+  const valid = await verifyPassword(String(password).slice(0, 1024), row && !locked ? row.passwordHash : DUMMY_HASH);
 
   if (!row || !valid || locked) {
-    recordLoginFailure([emailKey, ipKey]);
+    await recordLoginFailure([emailKey, ipKey]);
     // No password, no raw email: hashed keys only.
-    audit(row?.tenant_id ?? "system", row?.id ?? "anonymous", locked ? "auth.login_locked" : "auth.login_failed",
+    await data.audit.log(row?.tenantId ?? "system", row?.id ?? "anonymous", locked ? "auth.login_locked" : "auth.login_failed",
       `${row ? "known_user" : "unknown_user"} ${ipKey}`);
     return { ok: false };
   }
-  clearLoginFailures(emailKey);
-  audit(row.tenant_id, row.id, "auth.login_ok", ipKey);
+  await clearLoginFailures(emailKey);
+  await data.audit.log(row.tenantId, row.id, "auth.login_ok", ipKey);
 
   const exp = Date.now() + TTL_MS;
-  const payload = `${row.id}.${row.tenant_id}.${exp}`;
+  const payload = `${row.id}.${row.tenantId}.${exp}`;
   (await cookies()).set(COOKIE, `${payload}.${sign(payload)}`, {
     httpOnly: true, sameSite: "lax", secure: cookieSecure(), path: "/", maxAge: TTL_MS / 1000,
   });
@@ -79,9 +78,8 @@ export async function getSession(): Promise<Session | null> {
   if (parts.length !== 4) return null;
   const [userId, tenantId, exp, sig] = parts;
   if (!safeEqual(sign(`${userId}.${tenantId}.${exp}`), sig) || Number(exp) < Date.now()) return null;
-  const u = getDb().prepare("SELECT id, tenant_id, name, email FROM users WHERE id = ?").get(userId) as
-    | { id: string; tenant_id: string; name: string; email: string } | undefined;
-  return u ? { userId: u.id, tenantId: u.tenant_id, name: u.name, email: u.email } : null;
+  const u = await getData().users.get(userId);
+  return u ? { userId: u.id, tenantId: u.tenantId, name: u.name, email: u.email } : null;
 }
 /** Use at the top of every server action / route handler that needs a tenant. Throws a 401 Response. */
 export async function requireSession(): Promise<Session> {

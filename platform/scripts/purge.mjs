@@ -6,7 +6,7 @@ import { loadApp } from "./lib/bootstrap.mjs";
 const tenantId = process.argv[2] || undefined;
 const { purgeOldData } = await loadApp("lib/retention/index.ts");
 try {
-  const r = purgeOldData(tenantId);
+  const r = await purgeOldData(tenantId);
   console.log(`[purge] ${new Date().toISOString()} ${JSON.stringify(r)}`);
 } catch (e) {
   console.error("[purge] failed:", e instanceof Error ? e.message : e);

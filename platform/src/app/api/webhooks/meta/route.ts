@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import { checkVerifyHandshake, parseMetaPayload, parseMetaStatusFailures, signaturePolicy, type MetaInbound } from "@/lib/channels/meta";
-import { getOrCreateConversation } from "@/lib/store";
+import { getData } from "@/lib/data";
 import { routeTenant } from "@/lib/channels/routing";
 import { handleInbound } from "@/lib/engine";
 import { sendToCustomer } from "@/lib/channels/send";
@@ -15,14 +15,14 @@ export async function GET(req: Request) {
 }
 
 async function processOne(item: MetaInbound) {
-  const tenantId = routeTenant(item);
+  const tenantId = await routeTenant(item);
   if (!tenantId) return; // unknown account: ignore
   const reply = await handleInbound({
     tenantId, channel: item.channel, externalId: item.externalId, customerName: item.customerName || undefined,
     text: item.text, providerMessageId: item.providerMessageId, media: item.media,
   });
   if (!reply.text) return; // human has the conversation, or bot disabled
-  const conv = getOrCreateConversation(tenantId, item.channel, item.externalId, item.customerName);
+  const conv = await getData().conversations.getOrCreate(tenantId, item.channel, item.externalId, item.customerName);
   const sent = await sendToCustomer(tenantId, conv, reply.text);
   if (!sent.ok) console.error(`[meta webhook] reply not delivered channel=${item.channel} error=${sent.error}`);
 }

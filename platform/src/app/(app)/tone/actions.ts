@@ -1,7 +1,7 @@
 "use server";
 import { z } from "zod";
 import { requireSession } from "@/lib/auth";
-import { audit, saveAgentSettings } from "@/lib/store";
+import { getData } from "@/lib/data";
 import { serializeBusinessHours, storableCustomText } from "@/lib/context/settings";
 
 const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -35,7 +35,8 @@ export async function saveToneAction(input: unknown): Promise<SaveToneResult> {
   // Store only what the user wrote. "" lets the engine use its tone-aware templates (agent name, usted/tú, emoji).
   const greeting = storableCustomText(d.greeting, "greeting");
   const fallbackMessage = storableCustomText(d.fallbackMessage, "fallback");
-  saveAgentSettings(s.tenantId, {
+  const data = getData();
+  await data.settings.save(s.tenantId, {
     agentName: d.agentName,
     toneLevel: d.toneLevel as 1 | 2 | 3 | 4 | 5,
     languageDefault: d.languageDefault,
@@ -46,6 +47,6 @@ export async function saveToneAction(input: unknown): Promise<SaveToneResult> {
     crossSellLevel: d.crossSellLevel as 0 | 1 | 2 | 3,
     businessHours: serializeBusinessHours(d.hours),
   });
-  audit(s.tenantId, s.userId, "settings.save", "tone");
+  await data.settings.markToneSaved(s.tenantId, s.userId);
   return { ok: true, greeting, fallbackMessage };
 }

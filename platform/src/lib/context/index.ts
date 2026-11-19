@@ -12,8 +12,8 @@ export {
 } from "./section-repo";
 
 /** Rebuild chunks for every context section of the tenant (e.g. after import or seed). */
-export function reindexAllSections(tenantId: string): void {
-  for (const key of CONTEXT_SECTION_KEYS) reindexSection(tenantId, key);
+export async function reindexAllSections(tenantId: string): Promise<void> {
+  for (const key of CONTEXT_SECTION_KEYS) await reindexSection(tenantId, key);
 }
 
 export { CONTEXT_SECTION_KEYS };

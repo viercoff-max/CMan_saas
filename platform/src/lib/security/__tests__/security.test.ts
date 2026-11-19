@@ -20,11 +20,11 @@ import { assertSafeUrl, isPrivateIp, UnsafeUrlError } from "../../context/fetch-
 const req = (method: string, headers: Record<string, string>, url = "http://localhost:3000/api/x") => new Request(url, { method, headers });
 
 describe("assertSameOrigin", () => {
-  it("allows same-origin POST (Host or PUBLIC_URL)", () => {
+  it("allows same-origin POST (Host or PUBLIC_URL)", async () => {
     expect(checkSameOrigin(req("POST", { host: "localhost:3000", origin: "http://localhost:3000" }))).toBeNull();
     expect(checkSameOrigin(req("POST", { host: "localhost:3000", origin: "https://inbox.test" }))).toBeNull();
   });
-  it("rejects another origin, another localhost port, Origin null and cross-site fetch metadata", () => {
+  it("rejects another origin, another localhost port, Origin null and cross-site fetch metadata", async () => {
     for (const h of <Record<string, string>[]>[
       { host: "localhost:3000", origin: "https://evil.example" },
       { host: "localhost:3000", origin: "http://localhost:5173" },
@@ -32,14 +32,14 @@ describe("assertSameOrigin", () => {
       { host: "localhost:3000", origin: "http://localhost:3000", "sec-fetch-site": "same-site" },
     ]) expect(checkSameOrigin(req("POST", h))?.status).toBe(403);
   });
-  it("missing Origin: OK for GET/HEAD, POST needs a same-origin Referer", () => {
+  it("missing Origin: OK for GET/HEAD, POST needs a same-origin Referer", async () => {
     expect(checkSameOrigin(req("GET", { host: "localhost:3000" }))).toBeNull();
     expect(checkSameOrigin(req("HEAD", { host: "localhost:3000" }))).toBeNull();
     expect(checkSameOrigin(req("POST", { host: "localhost:3000" }))?.status).toBe(403);
     expect(checkSameOrigin(req("DELETE", { host: "localhost:3000", referer: "https://evil.example/x" }))?.status).toBe(403);
     expect(checkSameOrigin(req("POST", { host: "localhost:3000", referer: "http://localhost:3000/addons" }))).toBeNull();
   });
-  it("assertSameOrigin throws a 403 Response", () => {
+  it("assertSameOrigin throws a 403 Response", async () => {
     let thrown: unknown;
     try { assertSameOrigin(req("POST", { host: "localhost:3000", origin: "https://evil.example" })); } catch (e) { thrown = e; }
     expect(thrown).toBeInstanceOf(Response);
@@ -48,14 +48,14 @@ describe("assertSameOrigin", () => {
 });
 
 describe("upload checks", () => {
-  it("MIME must fit the extension (lenient for empty/octet-stream and Windows csv)", () => {
+  it("MIME must fit the extension (lenient for empty/octet-stream and Windows csv)", async () => {
     expect(mimeMatchesExt("application/pdf", "pdf")).toBe(true);
     expect(mimeMatchesExt("", "md")).toBe(true);
     expect(mimeMatchesExt("application/vnd.ms-excel", "csv")).toBe(true);
     expect(mimeMatchesExt("application/x-msdownload", "pdf")).toBe(false);
     expect(mimeMatchesExt("text/html", "docx")).toBe(false);
   });
-  it("magic bytes", () => {
+  it("magic bytes", async () => {
     expect(contentMatchesExt(Buffer.from("%PDF-1.7\n..."), "pdf")).toBe(true);
     expect(contentMatchesExt(Buffer.from("MZ\x90\x00"), "pdf")).toBe(false);
     expect(contentMatchesExt(Buffer.from([0x50, 0x4b, 0x03, 0x04, 1]), "docx")).toBe(true);
@@ -66,18 +66,18 @@ describe("upload checks", () => {
 });
 
 describe("rate limiter", () => {
-  it("fixed window", () => {
+  it("fixed window", async () => {
     const now = 1_000_000;
-    for (let i = 0; i < 3; i++) expect(hit("k-test", 3, 60_000, now + i).ok).toBe(true);
-    const r = hit("k-test", 3, 60_000, now + 10);
+    for (let i = 0; i < 3; i++) expect((await hit("k-test", 3, 60_000, now + i)).ok).toBe(true);
+    const r = await hit("k-test", 3, 60_000, now + 10);
     expect(r.ok).toBe(false);
     expect(r.retryAfterS).toBeGreaterThan(0);
-    expect(hit("k-test", 3, 60_000, now + 61_000).ok).toBe(true);
+    expect((await hit("k-test", 3, 60_000, now + 61_000)).ok).toBe(true);
   });
 });
 
 describe("login hardening", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jar.clear();
     const db = getDb();
     db.exec("DELETE FROM users; DELETE FROM audit_log;");
@@ -118,7 +118,7 @@ describe("login hardening", () => {
     expect(await login("admin@example.test", "correct horse battery", "8.8.8.8")).toEqual({ ok: true });
   });
 
-  it("Secure cookie follows PUBLIC_URL scheme", () => {
+  it("Secure cookie follows PUBLIC_URL scheme", async () => {
     const prev = process.env.PUBLIC_URL;
     process.env.PUBLIC_URL = "http://localhost:3000";
     expect(cookieSecure()).toBe(process.env.NODE_ENV === "production");
@@ -129,7 +129,7 @@ describe("login hardening", () => {
 });
 
 describe("fetch-safe additions (REVIEW-security L1)", () => {
-  it("blocks site-local, Teredo and local-use NAT64", () => {
+  it("blocks site-local, Teredo and local-use NAT64", async () => {
     expect(isPrivateIp("fec0::1")).toBe(true);
     expect(isPrivateIp("2001:0:4136:e378:8000:63bf:3fff:fdd2")).toBe(true);
     expect(isPrivateIp("64:ff9b:1::a00:1")).toBe(true);

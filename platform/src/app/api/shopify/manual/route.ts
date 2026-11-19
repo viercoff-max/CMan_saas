@@ -4,7 +4,7 @@
 //  {shop, token}:                  existing admin-created custom app token ("shpat_..."). Shopify no longer lets
 //                                   merchants CREATE these apps, but existing ones keep working.
 import { z } from "zod";
-import { audit, saveAddon } from "@/lib/store";
+import { getData } from "@/lib/data";
 import { json, tenantOr401 } from "@/lib/shopify/http";
 import { normalizeShopDomain } from "@/lib/shopify/config";
 import { shopifyGraphql } from "@/lib/shopify/graphql";
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
   const bad = checkSameOrigin(req); if (bad) return bad;
   const tenantId = await tenantOr401();
   if (typeof tenantId !== "string") return tenantId;
-  const limited = limitOr429(`shopify-manual:${tenantId}`, 10, 15 * 60_000); if (limited) return limited;
+  const limited = await limitOr429(`shopify-manual:${tenantId}`, 10, 15 * 60_000); if (limited) return limited;
   const raw = await req.json().catch(() => null);
   const cc = Cc.safeParse(raw);
   const st = cc.success ? null : Static.safeParse(raw);
@@ -52,7 +52,9 @@ export async function POST(req: Request) {
   }
 
   const mode = cc.success ? "client_credentials" : "manual";
-  saveAddon(tenantId, "shopify", { status: "connected", secrets, publicInfo: { shop, name: r.data.shop.name || shop, mode } });
-  audit(tenantId, "user", "shopify.connected", `${mode} ${shop}`);
+  const data = getData();
+  await data.secrets.set(tenantId, "addon", "shopify", secrets);
+  await data.addons.save(tenantId, "shopify", { status: "connected", publicInfo: { shop, name: r.data.shop.name || shop, mode } });
+  await data.audit.log(tenantId, "user", "shopify.connected", `${mode} ${shop}`);
   return json({ ok: true });
 }

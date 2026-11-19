@@ -7,24 +7,24 @@ import { vi } from "vitest";
 import { getDb } from "@/lib/db";
 import { sign } from "@/lib/crypto";
 import { hashPassword } from "@/lib/auth";
-import { getAgentSettings, listMessages, saveContextSection } from "@/lib/store";
 import { reindexSection } from "@/lib/context";
 import type { LLM, LLMRequest } from "@/lib/engine/llm";
 import type { ContextSectionKey } from "@/lib/types";
 import { DATA_DIR, OUTBOX } from "./setup";
+import { getData } from "@/lib/data";
 
 // ---------------- session (real auth.ts, cookie supplied through a mocked next/headers) ----------------
 const G = globalThis as { __e2eCookie?: string };
 export interface TestTenant { tenantId: string; userId: string; cookie: string }
 
-export function newTenant(name = "Chefman"): TestTenant {
+export async function newTenant(name = "Chefman"): Promise<TestTenant> {
   const tenantId = `t${randomUUID().replace(/-/g, "")}`;
   const userId = randomUUID();
   const db = getDb();
   db.prepare("INSERT INTO tenants (id, name) VALUES (?, ?)").run(tenantId, name);
   db.prepare("INSERT INTO users (id, tenant_id, email, name, password_hash) VALUES (?,?,?,?,?)")
     .run(userId, tenantId, `admin-${tenantId}@example.test`, "Admin", hashPassword("not-a-real-password"));
-  getAgentSettings(tenantId);
+  await getData().settings.get(tenantId);
   const payload = `${userId}.${tenantId}.${Date.now() + 3_600_000}`;
   return { tenantId, userId, cookie: `${payload}.${sign(payload)}` };
 }
@@ -40,10 +40,10 @@ export const CHEFMAN_CONTEXT: Partial<Record<ContextSectionKey, string>> = {
 };
 
 /** Same thing the Context screen does: store.saveContextSection + context.reindexSection. */
-export function seedContext(tenantId: string, sections = CHEFMAN_CONTEXT) {
+export async function seedContext(tenantId: string, sections = CHEFMAN_CONTEXT) {
   for (const [k, v] of Object.entries(sections)) {
-    saveContextSection(tenantId, k as ContextSectionKey, v!);
-    reindexSection(tenantId, k as ContextSectionKey, v!);
+    await getData().sections.saveContent(tenantId, k as ContextSectionKey, v!);
+    await reindexSection(tenantId, k as ContextSectionKey, v!);
   }
 }
 
@@ -137,7 +137,7 @@ export function outboxFilesFor(conversationId: string, dir?: string): string[] {
   return dirs.flatMap((d) => (fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith(`-${conversationId}.txt`)).map((f) => path.join(d, f)) : []));
 }
 export const readOutbox = (conversationId: string, dir?: string) => outboxFilesFor(conversationId, dir).map((f) => fs.readFileSync(f, "utf8")).join("\n---\n");
-export const bodies = (tenantId: string, conversationId: string) => listMessages(tenantId, conversationId).map((m) => m.body);
+export const bodies = async (tenantId: string, conversationId: string) => (await getData().messages.list(tenantId, conversationId)).map((m) => m.body);
 export const routeCtx = (id: string) => ({ params: Promise.resolve({ id }) });
 /** Same-origin browser request (the inbox routes have a CSRF Origin check). */
 export const jsonReq = (url: string, body: unknown, origin = "https://inbox.test", method = "POST") =>

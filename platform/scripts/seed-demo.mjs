@@ -9,10 +9,10 @@ try {
   demo.assertDemoAllowed();
   const tenantId = tenantArg || demo.DEMO_TENANT;
   if (reset) {
-    const r = demo.resetDemo(tenantId);
+    const r = await demo.resetDemo(tenantId);
     console.log(`[demo] reset: removed ${r.conversations} demo conversations and ${r.sources} demo sources; original context/settings restored where unchanged.`);
   } else {
-    const r = demo.seedDemo(tenantId);
+    const r = await demo.seedDemo(tenantId);
     console.log(`[demo] seeded tenant '${tenantId}': ${r.sections} context sections, ${r.sources} sources, ${r.conversations} conversations (${r.messages} messages), Shopify demo store connected.`);
     console.log("[demo] remove with: npm run demo -- --reset");
   }

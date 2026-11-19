@@ -2,7 +2,7 @@
 // TODO(production): send through SMTP / Resend to settings.handoffEmail instead of (or in addition to) the outbox file.
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { getAgentSettings, getConversation, listMessages } from "../store";
+import { getData } from "../data";
 import { OUTBOX_DIR } from "../db";
 import { maskEmailsInText } from "../engine/text";
 
@@ -35,13 +35,14 @@ export function buildHandoffText(p: {
 
 export async function notifyHandoff(tenantId: string, conversationId: string, reason: string): Promise<void> {
   try {
-    const conv = getConversation(tenantId, conversationId);
+    const data = getData();
+    const conv = await data.conversations.get(tenantId, conversationId);
     if (!conv) return;
     // The simulator is the owner testing the bot: keep the status change (done by the engine) but never alert the team.
     if (conv.channel === "simulator") return;
-    const settings = getAgentSettings(tenantId);
+    const settings = await data.settings.get(tenantId);
     const base = (process.env.PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");
-    const msgs = listMessages(tenantId, conversationId, 500).slice(-10);
+    const msgs = (await data.messages.list(tenantId, conversationId, 500)).slice(-10);
     const { text } = buildHandoffText({
       to: settings.handoffEmail, reason, customerName: conv.customerName, channel: conv.channel,
       link: `${base}/inbox?c=${conv.id}`, messages: msgs,

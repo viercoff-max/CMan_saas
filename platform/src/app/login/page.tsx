@@ -20,7 +20,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const { error } = await searchParams;
   async function action(form: FormData) {
     "use server";
-    ensureSeed();
+    await ensureSeed();
     const ip = clientIp(await headers());
     const { ok } = await login(String(form.get("email") ?? ""), String(form.get("password") ?? ""), ip);
     redirect(ok ? "/dashboard" : "/login?error=1");

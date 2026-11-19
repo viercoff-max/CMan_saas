@@ -1,0 +1,17 @@
+// SQLite DataStore (node:sqlite, on-prem / local dev / tests). Wraps the synchronous SQL in async methods.
+import type { DataStore } from "../types";
+import { addons, channels, secrets } from "./integrations";
+import { conversations, messages } from "./inbox";
+import { chunks, sections, sources } from "./knowledge";
+import { audit, limiter, rateLimits, usage } from "./ops";
+import { members, tenants, users } from "./people";
+import { retention } from "./retention";
+import { brand, settings } from "./settings";
+
+export function createSqliteStore(): DataStore {
+  return {
+    backend: "sqlite",
+    tenants, members, users, settings, brand, sections, sources, chunks, conversations, messages,
+    addons, channels, secrets, audit, usage, limiter, rateLimits, retention,
+  };
+}

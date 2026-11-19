@@ -1,16 +1,10 @@
 // Demo seed for the local database (tenant 'chefman'): `npm run demo` / `npm run demo -- --reset`.
 // No network, no LLM, no Meta/Shopify. Everything it writes is fake and marked so reset removes ONLY demo rows:
 //   conversations.external_id 'demo-*', sources.title '[Demo] *', audit_log.actor 'demo' (flag + snapshot rows).
-// Users, passwords and secrets are never read or written.
-import { getDb } from "../db";
-import {
-  addMessage, audit, getAddon, getAgentSettings, getContextSections, createSource, replaceChunks,
-  saveAddon, saveAgentSettings, saveContextSection, setConversationState, setConversationStatus, getOrCreateConversation,
-  updateSourceStatus,
-} from "../store";
+// Users, passwords and real secrets are never read or written (only the demo store's `{ mock: true }` marker).
+import { getData } from "../data";
 import { CONTEXT_SECTION_KEYS, type ContextSectionKey } from "../types";
 import { chunkText, deleteSourceRowAndLinks, reindexSection, serializeBusinessHours } from "../context";
-import { isToneSaved } from "../context/tone-saved";
 import { maskEmailsInText } from "../engine/text";
 import {
   DEMO_ACTOR, DEMO_FILE_SOURCE, DEMO_HOURS, DEMO_LINK_SOURCE, DEMO_PREFIX, DEMO_SECTIONS, DEMO_SETTINGS,
@@ -37,22 +31,16 @@ export function assertDemoAllowed(env: Record<string, string | undefined> = proc
 
 export interface DemoResult { conversations: number; messages: number; sources: number; sections: number }
 
-type Row = Record<string, unknown>;
-const demoConvIds = (t: string) =>
-  (getDb().prepare("SELECT id FROM conversations WHERE tenant_id=? AND substr(external_id,1,?)=?").all(t, DEMO_PREFIX.length, DEMO_PREFIX) as Row[]).map((r) => r.id as string);
-
-function removeDemoConversations(t: string): number {
-  const db = getDb(); const ids = demoConvIds(t);
-  for (const id of ids) {
-    db.prepare("DELETE FROM messages WHERE tenant_id=? AND conversation_id=?").run(t, id);
-    db.prepare("DELETE FROM conversations WHERE tenant_id=? AND id=?").run(t, id);
-  }
+async function removeDemoConversations(t: string): Promise<number> {
+  const data = getData();
+  const ids = await data.conversations.listIdsByExternalPrefix(t, DEMO_PREFIX);
+  for (const id of ids) await data.conversations.delete(t, id);
   return ids.length;
 }
-function removeDemoSources(t: string): number {
-  const rows = getDb().prepare("SELECT id FROM sources WHERE tenant_id=? AND substr(title,1,?)=?").all(t, DEMO_SOURCE_PREFIX.length, DEMO_SOURCE_PREFIX) as Row[];
-  for (const r of rows) deleteSourceRowAndLinks(t, r.id as string); // also drops Context section links
-  return rows.length;
+async function removeDemoSources(t: string): Promise<number> {
+  const demo = (await getData().sources.list(t)).filter((s) => s.title.startsWith(DEMO_SOURCE_PREFIX));
+  for (const s of demo) await deleteSourceRowAndLinks(t, s.id); // also drops Context section links
+  return demo.length;
 }
 
 interface Snapshot {
@@ -60,111 +48,116 @@ interface Snapshot {
   settings: { agentName: string; toneLevel: number; languageDefault: "es" | "en"; languageAlt: "es" | "en"; greeting: string; fallbackMessage: string; handoffEmail: string; businessHours: string; crossSellLevel: number } | null;
   addon: { status: string; mock: boolean };
 }
-const getSnapshot = (t: string): Snapshot | null => {
-  const r = getDb().prepare("SELECT detail FROM audit_log WHERE tenant_id=? AND actor=? AND action=? LIMIT 1").get(t, DEMO_ACTOR, SNAPSHOT) as Row | undefined;
-  try { return r ? (JSON.parse(String(r.detail)) as Snapshot) : null; } catch { return null; }
+const getSnapshot = async (t: string): Promise<Snapshot | null> => {
+  const detail = await getData().audit.find(t, { actor: DEMO_ACTOR, action: SNAPSHOT });
+  try { return detail !== null ? (JSON.parse(detail) as Snapshot) : null; } catch { return null; }
 };
 
-function takeSnapshot(t: string): void {
-  if (getSnapshot(t)) return; // keep the ORIGINAL state across re-runs
-  const s = getAgentSettings(t);
+async function takeSnapshot(t: string): Promise<void> {
+  if (await getSnapshot(t)) return; // keep the ORIGINAL state across re-runs
+  const data = getData();
+  const s = await data.settings.get(t);
+  const addon = await data.addons.get(t, "shopify");
   const snap: Snapshot = {
-    sections: Object.fromEntries(getContextSections(t).map((x) => [x.key, x.content])),
+    sections: Object.fromEntries((await data.sections.list(t)).map((x) => [x.key, x.content])),
     settings: {
       agentName: s.agentName, toneLevel: s.toneLevel, languageDefault: s.languageDefault, languageAlt: s.languageAlt,
       greeting: s.greeting, fallbackMessage: s.fallbackMessage, handoffEmail: s.handoffEmail, businessHours: s.businessHours,
       crossSellLevel: s.crossSellLevel,
     },
-    addon: { status: getAddon(t, "shopify").status, mock: getAddon(t, "shopify").publicInfo.mock === true },
+    addon: { status: addon.status, mock: addon.publicInfo.mock === true },
   };
-  audit(t, DEMO_ACTOR, SNAPSHOT, JSON.stringify(snap));
+  await data.audit.log(t, DEMO_ACTOR, SNAPSHOT, JSON.stringify(snap));
 }
 
-export function seedDemo(tenantId: string = DEMO_TENANT, now: Date = new Date()): DemoResult {
+export async function seedDemo(tenantId: string = DEMO_TENANT, now: Date = new Date()): Promise<DemoResult> {
   assertDemoAllowed();
-  const db = getDb();
-  db.prepare("INSERT OR IGNORE INTO tenants (id, name) VALUES (?, ?)").run(tenantId, "Chefman");
-  takeSnapshot(tenantId);
+  const data = getData();
+  await data.tenants.ensure(tenantId, "Chefman");
+  await takeSnapshot(tenantId);
 
   // (1) context sections, saved + chunked/indexed
   for (const key of CONTEXT_SECTION_KEYS) {
-    saveContextSection(tenantId, key, DEMO_SECTIONS[key]);
-    reindexSection(tenantId, key, DEMO_SECTIONS[key]);
+    await data.sections.saveContent(tenantId, key, DEMO_SECTIONS[key]);
+    await reindexSection(tenantId, key, DEMO_SECTIONS[key]);
   }
 
-  // (2) agent settings; "tone saved" is the same audit marker the Tone page writes
-  saveAgentSettings(tenantId, { ...DEMO_SETTINGS, languageDefault: "es", languageAlt: "en", businessHours: serializeBusinessHours(DEMO_HOURS) });
-  if (!isToneSaved(tenantId)) audit(tenantId, DEMO_ACTOR, "settings.save", "tone");
+  // (2) agent settings; "tone saved" is the same marker the Tone page writes
+  await data.settings.save(tenantId, { ...DEMO_SETTINGS, languageDefault: "es", languageAlt: "en", businessHours: serializeBusinessHours(DEMO_HOURS) });
+  if (!(await data.settings.isToneSaved(tenantId))) await data.settings.markToneSaved(tenantId, DEMO_ACTOR);
 
   // (3) sources (idempotent: recreate)
-  removeDemoSources(tenantId);
-  const link = createSource(tenantId, { kind: "link", title: DEMO_LINK_SOURCE.title, url: DEMO_LINK_SOURCE.url });
-  updateSourceStatus(tenantId, link.id, "indexed", undefined, DEMO_LINK_SOURCE.text);
-  replaceChunks(tenantId, { sourceId: link.id }, chunkText(DEMO_LINK_SOURCE.text, DEMO_LINK_SOURCE.title));
-  const file = createSource(tenantId, { kind: "file", title: DEMO_FILE_SOURCE.title, filePath: DEMO_FILE_SOURCE.filePath });
-  updateSourceStatus(tenantId, file.id, "indexed", undefined, DEMO_FILE_SOURCE.text);
-  replaceChunks(tenantId, { sourceId: file.id }, chunkText(DEMO_FILE_SOURCE.text, DEMO_FILE_SOURCE.title));
+  await removeDemoSources(tenantId);
+  const link = await data.sources.create(tenantId, { kind: "link", title: DEMO_LINK_SOURCE.title, url: DEMO_LINK_SOURCE.url });
+  await data.sources.updateStatus(tenantId, link.id, "indexed", undefined, DEMO_LINK_SOURCE.text);
+  await data.chunks.replace(tenantId, { sourceId: link.id }, chunkText(DEMO_LINK_SOURCE.text, DEMO_LINK_SOURCE.title));
+  const file = await data.sources.create(tenantId, { kind: "file", title: DEMO_FILE_SOURCE.title, filePath: DEMO_FILE_SOURCE.filePath });
+  await data.sources.updateStatus(tenantId, file.id, "indexed", undefined, DEMO_FILE_SOURCE.text);
+  await data.chunks.replace(tenantId, { sourceId: file.id }, chunkText(DEMO_FILE_SOURCE.text, DEMO_FILE_SOURCE.title));
 
   // (4) Shopify demo store, exactly like POST /api/shopify/demo (never replaces a real connection)
-  const cur = getAddon(tenantId, "shopify");
+  const cur = await data.addons.get(tenantId, "shopify");
   if (cur.status !== "connected" || cur.publicInfo.mock === true) {
-    saveAddon(tenantId, "shopify", {
-      status: "connected", secrets: { mock: true },
+    await data.secrets.set(tenantId, "addon", "shopify", { mock: true });
+    await data.addons.save(tenantId, "shopify", {
+      status: "connected",
       publicInfo: { shop: "demo.myshopify.com", name: "Tienda de demostración", mock: true, mode: "demo" },
     });
-    if (cur.status !== "connected") audit(tenantId, DEMO_ACTOR, "shopify.connected", "demo");
+    if (cur.status !== "connected") await data.audit.log(tenantId, DEMO_ACTOR, "shopify.connected", "demo");
   }
 
-  // (5) conversations: written via addMessage, then timestamps adjusted
-  removeDemoConversations(tenantId);
+  // (5) conversations: written via messages.add, then timestamps adjusted
+  await removeDemoConversations(tenantId);
   let messages = 0;
   const convs = buildConversations(now);
   for (const c of convs) {
-    const conv = getOrCreateConversation(tenantId, c.channel, `${DEMO_PREFIX}${c.key}`, c.name);
+    const conv = await data.conversations.getOrCreate(tenantId, c.channel, `${DEMO_PREFIX}${c.key}`, c.name);
     let t = now.getTime() - c.startAgo * 60_000;
     const first = t;
     for (const m of c.msgs) {
       t += (m.mins ?? (m.from === "b" ? 0.2 : 1)) * 60_000;
       const body = m.from === "c" ? maskEmailsInText(m.text) : m.text;
-      const msg = addMessage(tenantId, conv.id, {
+      const msg = await data.messages.add(tenantId, conv.id, {
         direction: m.from === "c" ? "in" : "out", sender: m.from === "c" ? "customer" : m.from === "b" ? "bot" : "agent",
         body, meta: { demo: true, lang: "es", ...(m.meta ?? {}) },
       });
-      db.prepare("UPDATE messages SET created_at=? WHERE id=?").run(new Date(Math.min(t, now.getTime())).toISOString(), msg.id);
+      await data.messages.setCreatedAt(tenantId, msg.id, new Date(Math.min(t, now.getTime())).toISOString());
       messages++;
     }
-    setConversationState(tenantId, conv.id, { lang: "es", greeted: true, botTurns: c.msgs.filter((m) => m.from === "b").length, demo: true });
-    setConversationStatus(tenantId, conv.id, c.status, c.reason ?? null);
-    db.prepare("UPDATE conversations SET unread=?, created_at=?, last_message_at=? WHERE tenant_id=? AND id=?")
-      .run(c.unread, new Date(first).toISOString(), new Date(Math.min(t, now.getTime())).toISOString(), tenantId, conv.id);
+    await data.conversations.setState(tenantId, conv.id, { lang: "es", greeted: true, botTurns: c.msgs.filter((m) => m.from === "b").length, demo: true });
+    await data.conversations.setStatus(tenantId, conv.id, c.status, c.reason ?? null);
+    await data.conversations.setTimestamps(tenantId, conv.id, {
+      unread: c.unread, createdAt: new Date(first).toISOString(), lastMessageAt: new Date(Math.min(t, now.getTime())).toISOString(),
+    });
   }
 
   // flag row (one per tenant)
-  if (!db.prepare("SELECT 1 FROM audit_log WHERE tenant_id=? AND actor=? AND action=?").get(tenantId, DEMO_ACTOR, FLAG))
-    audit(tenantId, DEMO_ACTOR, FLAG, "demo data present");
+  if ((await data.audit.find(tenantId, { actor: DEMO_ACTOR, action: FLAG })) === null)
+    await data.audit.log(tenantId, DEMO_ACTOR, FLAG, "demo data present");
   return { conversations: convs.length, messages, sources: 2, sections: CONTEXT_SECTION_KEYS.length };
 }
 
-export function resetDemo(tenantId: string = DEMO_TENANT): { conversations: number; sources: number } {
-  const conversations = removeDemoConversations(tenantId);
-  const sources = removeDemoSources(tenantId);
-  const snap = getSnapshot(tenantId);
+export async function resetDemo(tenantId: string = DEMO_TENANT): Promise<{ conversations: number; sources: number }> {
+  const data = getData();
+  const conversations = await removeDemoConversations(tenantId);
+  const sources = await removeDemoSources(tenantId);
+  const snap = await getSnapshot(tenantId);
 
   // Context sections and settings: restore the original ONLY where they still hold the demo values (never clobber edits).
   if (snap) {
-    const now = new Map(getContextSections(tenantId).map((s) => [s.key, s.content]));
+    const now = new Map((await data.sections.list(tenantId)).map((s) => [s.key, s.content]));
     for (const key of CONTEXT_SECTION_KEYS as readonly ContextSectionKey[]) {
       if (now.get(key) !== DEMO_SECTIONS[key]) continue;
       const prev = snap.sections[key] ?? "";
-      saveContextSection(tenantId, key, prev);
-      reindexSection(tenantId, key, prev);
+      await data.sections.saveContent(tenantId, key, prev);
+      await reindexSection(tenantId, key, prev);
     }
-    const s = getAgentSettings(tenantId);
+    const s = await data.settings.get(tenantId);
     if (snap.settings && s.agentName === DEMO_SETTINGS.agentName && s.handoffEmail === DEMO_SETTINGS.handoffEmail && s.businessHours === serializeBusinessHours(DEMO_HOURS))
-      saveAgentSettings(tenantId, snap.settings as never);
-    const a = getAddon(tenantId, "shopify");
-    if (a.publicInfo.mock === true && snap.addon.status !== "connected") saveAddon(tenantId, "shopify", { status: "disconnected" });
+      await data.settings.save(tenantId, snap.settings as never);
+    const a = await data.addons.get(tenantId, "shopify");
+    if (a.publicInfo.mock === true && snap.addon.status !== "connected") await data.addons.save(tenantId, "shopify", { status: "disconnected" });
   }
-  getDb().prepare("DELETE FROM audit_log WHERE tenant_id=? AND actor=?").run(tenantId, DEMO_ACTOR);
+  await data.audit.deleteByActor(tenantId, DEMO_ACTOR);
   return { conversations, sources };
 }

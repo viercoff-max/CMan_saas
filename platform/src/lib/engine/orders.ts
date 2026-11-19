@@ -69,8 +69,8 @@ export type OrderOutcome =
 
 /** Cross-conversation limiter (see limiter.ts); optional so the flow stays testable without a DB. */
 export interface LookupLimiter {
-  isBlocked(orderNumber: string, email: string): boolean;
-  recordFailure(orderNumber: string, email: string): void;
+  isBlocked(orderNumber: string, email: string): boolean | Promise<boolean>;
+  recordFailure(orderNumber: string, email: string): void | Promise<void>;
 }
 
 export interface OrderFlowInput {
@@ -141,7 +141,7 @@ export async function runOrderFlow(i: OrderFlowInput): Promise<OrderOutcome> {
 
   // Cross-conversation limiter: too many recent failures for this order number, email or tenant => do not call the
   // connector; same generic text plus a human offer.
-  if (i.limiter?.isBlocked(number, mail)) {
+  if (await i.limiter?.isBlocked(number, mail)) {
     const esc = fail();
     if (esc) return esc;
     return {
@@ -165,7 +165,7 @@ export async function runOrderFlow(i: OrderFlowInput): Promise<OrderOutcome> {
       }),
     };
   }
-  i.limiter?.recordFailure(number, mail);
+  await i.limiter?.recordFailure(number, mail);
   const esc = fail();
   if (esc) return esc;
   if (res.mayBeOutsideWindow || res.tooOld) {

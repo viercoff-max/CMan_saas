@@ -1,6 +1,6 @@
 // Indexes one source (link or uploaded file): extract text -> save content_text -> re-chunk. Never throws.
 import fs from "node:fs/promises";
-import { getSource, replaceChunks, updateSourceStatus } from "../store";
+import { getData } from "../data";
 import { chunkText } from "./chunk";
 import { extFromContentType, extOf, extractFromBuffer, googleExportUrl, htmlToText, MAX_UPLOAD_BYTES } from "./extract";
 import { fetchSafe, UnsafeUrlError } from "./fetch-safe";
@@ -12,8 +12,8 @@ export { resolveUploadPath };
 const MAX_TEXT = 400_000;
 
 /** Sections that use this source (as their file or as a linked source) are re-chunked from the new text. */
-function refreshSections(tenantId: string, sourceId: string): void {
-  try { refreshSourceSections(tenantId, sourceId); }
+async function refreshSections(tenantId: string, sourceId: string): Promise<void> {
+  try { await refreshSourceSections(tenantId, sourceId); }
   catch (e) { console.error("[context] section refresh failed:", e instanceof Error ? e.message : "error"); }
 }
 
@@ -34,7 +34,8 @@ function friendlyError(e: unknown): string {
 export type IndexResult = { ok: boolean; chunks: number; error?: string };
 
 export async function indexSource(tenantId: string, sourceId: string): Promise<IndexResult> {
-  const src = getSource(tenantId, sourceId);
+  const data = getData();
+  const src = await data.sources.get(tenantId, sourceId);
   if (!src) return { ok: false, chunks: 0, error: "not_found" };
   try {
     let text = "";
@@ -56,14 +57,14 @@ export async function indexSource(tenantId: string, sourceId: string): Promise<I
     text = text.slice(0, MAX_TEXT).trim();
     if (!text) throw new Error("empty");
     const chunks = chunkText(text, src.title);
-    updateSourceStatus(tenantId, sourceId, "indexed", undefined, text);
-    replaceChunks(tenantId, { sourceId }, chunks);
-    refreshSections(tenantId, sourceId);
+    await data.sources.updateStatus(tenantId, sourceId, "indexed", undefined, text);
+    await data.chunks.replace(tenantId, { sourceId }, chunks);
+    await refreshSections(tenantId, sourceId);
     return { ok: true, chunks: chunks.length };
   } catch (e) {
     const code = e instanceof Error && e.message === "google_private" ? "google_private" : friendlyError(e);
-    updateSourceStatus(tenantId, sourceId, "error", code);
-    refreshSections(tenantId, sourceId); // a section file that failed falls back to the typed text
+    await data.sources.updateStatus(tenantId, sourceId, "error", code);
+    await refreshSections(tenantId, sourceId); // a section file that failed falls back to the typed text
     return { ok: false, chunks: 0, error: code };
   }
 }

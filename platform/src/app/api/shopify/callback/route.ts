@@ -1,7 +1,7 @@
 // OAuth callback. No session: trust comes from the signed state cookie + Shopify HMAC (constant-time).
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { audit, saveAddon } from "@/lib/store";
+import { getData } from "@/lib/data";
 import { publicUrl } from "@/lib/shopify/http";
 import { normalizeShopDomain, validateOAuthHmac } from "@/lib/shopify/config";
 import { readState, STATE_COOKIE } from "@/lib/shopify/oauth-state";
@@ -40,12 +40,13 @@ export async function GET(req: Request) {
     if (!tok.access_token) return back("shopify_error");
 
     const info = await shopifyGraphql<{ shop?: { name?: string } }>(shop, tok.access_token, "{ shop { name } }");
-    saveAddon(st.tenantId, "shopify", {
+    const data = getData();
+    await data.secrets.set(st.tenantId, "addon", "shopify", { shop, accessToken: tok.access_token, scopes: tok.scope ?? "" });
+    await data.addons.save(st.tenantId, "shopify", {
       status: "connected",
-      secrets: { shop, accessToken: tok.access_token, scopes: tok.scope ?? "" },
       publicInfo: { shop, name: info.data?.shop?.name || shop, mode: "oauth" },
     });
-    audit(st.tenantId, "system", "shopify.connected", `oauth ${shop}`);
+    await data.audit.log(st.tenantId, "system", "shopify.connected", `oauth ${shop}`);
     return back("shopify_connected");
   } catch {
     return back("shopify_error");

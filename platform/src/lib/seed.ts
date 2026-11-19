@@ -1,13 +1,10 @@
 // Creates the first tenant + admin from .env.local if the DB is empty. Called on login and in the app shell.
-import { getDb } from "./db";
+import { getData } from "./data";
 import { hashPassword } from "./auth";
-import { newId } from "./ids";
-import { getAgentSettings } from "./store";
 
-export function ensureSeed(): void {
-  const db = getDb();
-  const n = (db.prepare("SELECT COUNT(*) c FROM users").get() as { c: number }).c;
-  if (n > 0) {
+export async function ensureSeed(): Promise<void> {
+  const data = getData();
+  if ((await data.users.count()) > 0) {
     // H3: the seed password should not stay in plain text on disk once the admin exists.
     const g = globalThis as { __seedWarned?: boolean };
     if (process.env.ADMIN_PASSWORD && !g.__seedWarned) {
@@ -20,12 +17,10 @@ export function ensureSeed(): void {
   const password = process.env.ADMIN_PASSWORD;
   if (!email || !password) throw new Error("ADMIN_EMAIL / ADMIN_PASSWORD missing. Run: npm run setup");
   const tenantId = "chefman";
-  db.prepare("INSERT OR IGNORE INTO tenants (id, name) VALUES (?, ?)").run(tenantId, process.env.TENANT_NAME ?? "Chefman");
-  db.prepare("INSERT INTO users (id, tenant_id, email, name, password_hash) VALUES (?,?,?,?,?)")
-    .run(newId(), tenantId, email, "Admin", hashPassword(password));
-  getAgentSettings(tenantId);
+  await data.tenants.ensure(tenantId, process.env.TENANT_NAME ?? "Chefman");
+  await data.users.create({ tenantId, email, name: "Admin", passwordHash: hashPassword(password) });
+  await data.settings.get(tenantId);
 }
-export function getTenantName(tenantId: string): string {
-  const r = getDb().prepare("SELECT name FROM tenants WHERE id = ?").get(tenantId) as { name: string } | undefined;
-  return r?.name ?? tenantId;
+export async function getTenantName(tenantId: string): Promise<string> {
+  return (await getData().tenants.get(tenantId))?.name ?? tenantId;
 }

@@ -96,7 +96,7 @@ Transcripts are written by hand with the engine's own wording; nothing calls the
 
 ## Known gaps / next steps toward production
 - **Hosting (Vercel + Supabase)**:
-  - Replace `src/lib/db.ts` + `src/lib/store.ts` and the module repos (`engine/repo.ts`, `engine/limiter.ts`, `channels/repo.ts`, `security/rate-limit.ts`, `retention/`) with Postgres plus row-level security on `tenant_id`.
+  - Stage 1 DONE (2026-11-19): all data access goes through the async `getData()` DataStore (`src/lib/data`, SQLite backend). Next: the Supabase implementation (`DATA_BACKEND=supabase`, schema in `supabase/migrations`), then Supabase Auth. See `docs/ARCHITECTURE.md` "Data layer".
   - Move uploads (`DATA_DIR/uploads`) to Supabase Storage.
   - Move secrets to a KMS.
   - Webhook dedupe and rate limits must move to the database or the edge (today they are safe for one process only).

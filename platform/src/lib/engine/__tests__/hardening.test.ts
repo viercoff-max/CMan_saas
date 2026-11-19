@@ -15,18 +15,18 @@ import { maskEmailsInText, redactForLLM } from "../text";
 import { parseMediaText } from "../media";
 import { resolveOrder } from "../../shopify/connector";
 import type { ShopifyOrderNode } from "../../shopify/mapping";
-import { getConversation, getOrCreateConversation, listMessages, replaceChunks, saveAgentSettings } from "../../store";
 import type { AgentSettings, OrdersConnector } from "../../types";
+import { getData } from "../../data";
 
 const MONDAY_OPEN = new Date("2026-10-05T17:00:00Z");
 const SUNDAY = new Date("2026-10-04T17:00:00Z");
 const HOURS = JSON.stringify({ timezone: "America/Mexico_City", days: { mon: "09:00-18:00", tue: "09:00-18:00", wed: "09:00-18:00", thu: "09:00-18:00", fri: "09:00-18:00" } });
 
-function setupTenant(patch: Partial<Omit<AgentSettings, "tenantId">> = {}) {
+async function setupTenant(patch: Partial<Omit<AgentSettings, "tenantId">> = {}) {
   const t = `t-${randomUUID()}`;
-  saveAgentSettings(t, { agentName: "Chefi", toneLevel: 3, crossSellLevel: 0, greeting: "", fallbackMessage: "", businessHours: HOURS, ...patch });
-  replaceChunks(t, { sectionKey: "warranty" }, [{ title: "Garantía", text: "Todos los productos Chefman tienen garantía de 1 año contra defectos de fábrica." }]);
-  replaceChunks(t, { sectionKey: "shipping_returns" }, [{ title: "Reembolsos", text: "La política de reembolsos permite devolver productos sin uso en 30 días." }]);
+  await getData().settings.save(t, { agentName: "Chefi", toneLevel: 3, crossSellLevel: 0, greeting: "", fallbackMessage: "", businessHours: HOURS, ...patch });
+  await getData().chunks.replace(t, { sectionKey: "warranty" }, [{ title: "Garantía", text: "Todos los productos Chefman tienen garantía de 1 año contra defectos de fábrica." }]);
+  await getData().chunks.replace(t, { sectionKey: "shipping_returns" }, [{ title: "Reembolsos", text: "La política de reembolsos permite devolver productos sin uso en 30 días." }]);
   return t;
 }
 
@@ -59,9 +59,9 @@ let tenantId: string;
 let n = 0;
 const ev = (text: string, extra: Partial<EngineInboundEvent> = {}): EngineInboundEvent =>
   ({ tenantId, channel: "whatsapp", externalId: `c-${tenantId}`, customerName: "Juan", text, providerMessageId: `h-${++n}`, ...extra });
-const conv = (ext = `c-${tenantId}`) => getOrCreateConversation(tenantId, "whatsapp", ext);
+const conv = async (ext = `c-${tenantId}`) => await getData().conversations.getOrCreate(tenantId, "whatsapp", ext);
 
-beforeEach(() => { tenantId = setupTenant(); });
+beforeEach(async () => { tenantId = await setupTenant(); });
 
 // ---------------------------------------------------------------- order oracle (M1)
 describe("order lookup: no existence oracle", () => {
@@ -81,7 +81,7 @@ describe("order lookup: no existence oracle", () => {
       if (hasAll) expect(notFound.text).not.toMatch(/60 días/);
       else expect(notFound.text).toMatch(/Si tu pedido tiene más de 60 días/);
       // every one counted as a failure
-      for (const ext of ["a", "b", "c"]) expect((conv(ext).state as { order?: { failures?: number } }).order?.failures).toBe(1);
+      for (const ext of ["a", "b", "c"]) expect(((await conv(ext)).state as { order?: { failures?: number } }).order?.failures).toBe(1);
     });
   }
 
@@ -100,7 +100,7 @@ describe("order lookup: no existence oracle", () => {
     await handleInbound(ev("pedido 1111 correo a@gmail.com"), deps);
     const r = await handleInbound(ev("no"), deps);
     expect(r.escalated).toBe(false);
-    expect(conv().status).toBe("bot");
+    expect((await conv()).status).toBe("bot");
   });
 });
 
@@ -121,7 +121,7 @@ describe("cross-conversation lookup limiter", () => {
     expect(r.text).toMatch(/una persona de nuestro equipo/);
     expect(r.text).not.toMatch(/Estafeta|EST999888/);
     expect(llmCalls).toHaveLength(0);
-    const last = listMessages(tenantId, conv("fresh").id).at(-1)!;
+    const last = (await getData().messages.list(tenantId, (await conv("fresh")).id)).at(-1)!;
     expect(last.meta.lookupLimited).toBe(true);
     // accepting the offer goes to a person
     const r2 = await handleInbound(ev("sí, por favor", { externalId: "fresh" }), deps);
@@ -143,16 +143,16 @@ describe("cross-conversation lookup limiter", () => {
     // Pre-load MAX-1 failures straight into the limiter (distinct orders/emails, so only the tenant counter can trip);
     // running 60 full engine turns here was slow enough to hit the 5 s timeout under a loaded parallel run.
     const t0 = MONDAY_OPEN.getTime();
-    for (let i = 0; i < MAX_FAILS_PER_TENANT - 1; i++) recordLookupFailure(tenantId, `${10000 + i}`, `u${i}@gmail.com`, t0);
-    expect(isLookupBlocked(tenantId, "1234", "juan.perez@gmail.com", t0)).toBe(false);
+    for (let i = 0; i < MAX_FAILS_PER_TENANT - 1; i++) await recordLookupFailure(tenantId, `${10000 + i}`, `u${i}@gmail.com`, t0);
+    expect(await isLookupBlocked(tenantId, "1234", "juan.perez@gmail.com", t0)).toBe(false);
     // the 60th failure goes through the real engine path, which must record it
     await handleInbound(ev("pedido 99999 correo last@gmail.com", { externalId: "tb-last" }), deps);
     expect(calls).toHaveLength(1);
-    expect(isLookupBlocked(tenantId, "1234", "juan.perez@gmail.com", t0)).toBe(true);
+    expect(await isLookupBlocked(tenantId, "1234", "juan.perez@gmail.com", t0)).toBe(true);
     await handleInbound(ev("pedido 1234 correo juan.perez@gmail.com", { externalId: "tb-real" }), deps);
     expect(calls).toHaveLength(1);
     // other tenants are not affected
-    tenantId = setupTenant();
+    tenantId = await setupTenant();
     const r = await handleInbound(ev("pedido 1234 correo juan.perez@gmail.com"), deps);
     expect(r.text).toMatch(/Estafeta/);
   });
@@ -184,7 +184,7 @@ describe("per-conversation inbound throttle", () => {
     expect(t2.text).toBe("");
     expect(llmCalls).toHaveLength(0);
     // inbound is still stored for staff
-    expect(listMessages(tenantId, conv().id).at(-1)!.sender).toBe("customer");
+    expect((await getData().messages.list(tenantId, (await conv()).id)).at(-1)!.sender).toBe("customer");
     now = new Date(MONDAY_OPEN.getTime() + 11 * 60 * 1000);
     const r = await handleInbound(ev("¿Cuánto dura la garantía?"), deps);
     expect(r.text).toMatch(/1 año/);
@@ -199,25 +199,25 @@ describe("non-text messages", () => {
     expect(r).toMatchObject({ escalated: true, reason: "human_request" });
     expect(r.text).toMatch(/Recibimos tu foto, gracias\. Una persona lo va a revisar\./);
     expect(llmCalls).toHaveLength(0);
-    const c = getConversation(tenantId, conv().id)!;
+    const c = (await getData().conversations.get(tenantId, (await conv()).id))!;
     expect(c.status).toBe("needs_human");
     expect(c.escalationReason).toBe("human_request");
     expect(notify).toHaveBeenCalledWith(tenantId, c.id, "human_request");
-    const msgs = listMessages(tenantId, c.id);
+    const msgs = await getData().messages.list(tenantId, c.id);
     expect(msgs[0]).toMatchObject({ sender: "customer", body: "[Foto]" });
     expect(msgs[0].meta.media).toBe("image");
     expect(msgs.at(-1)!.meta.intent).toBe("attachment");
   });
 
   it("works from the placeholder text alone (simulator) and is tone-aware", async () => {
-    tenantId = setupTenant({ toneLevel: 1 });
+    tenantId = await setupTenant({ toneLevel: 1 });
     const { deps, llmCalls } = makeDeps();
     const r = await handleInbound(ev("[Nota de voz]"), deps);
     expect(r.text).toMatch(/^Recibimos su nota de voz, gracias\./);
     expect(llmCalls).toHaveLength(0);
-    tenantId = setupTenant();
+    tenantId = await setupTenant();
     expect((await handleInbound(ev("[Sticker]"), deps)).text).toMatch(/Recibimos tu mensaje/);
-    tenantId = setupTenant();
+    tenantId = await setupTenant();
     expect((await handleInbound(ev("[Ubicación]"), deps)).text).toMatch(/Recibimos tu ubicación/);
   });
 
@@ -235,7 +235,7 @@ describe("non-text messages", () => {
     expect(r.text).toMatch(/^We received your file, thanks\./);
   });
 
-  it("parseMediaText recognizes only known placeholders", () => {
+  it("parseMediaText recognizes only known placeholders", async () => {
     expect(parseMediaText("[Foto] hola")).toEqual({ kind: "image", caption: "hola" });
     expect(parseMediaText("[algo raro]")).toBeNull();
     expect(parseMediaText("hola [Foto]")).toBeNull();
@@ -250,10 +250,10 @@ describe("PII", () => {
     const r = await handleInbound(ev("pedido 1234 correo Juan.Perez@gmail.com"), deps);
     expect(calls).toEqual([{ n: "1234", e: "juan.perez@gmail.com" }]);
     expect(r.text).toMatch(/Estafeta/);
-    const all = JSON.stringify(listMessages(tenantId, conv().id));
+    const all = JSON.stringify(await getData().messages.list(tenantId, (await conv()).id));
     expect(all).not.toMatch(/juan\.perez@gmail\.com/i);
     expect(all).toMatch(/J\*\*\*@gmail\.com/);
-    expect(JSON.stringify(conv().state)).not.toMatch(/gmail/);
+    expect(JSON.stringify((await conv()).state)).not.toMatch(/gmail/);
   });
 
   it("history sent to the LLM has no emails, order numbers, tracking or order-status replies", async () => {
@@ -266,7 +266,7 @@ describe("PII", () => {
     expect(req.user).not.toMatch(/gmail|1234|EST999888|Estafeta|rastreo|55 1234 5678/);
   });
 
-  it("redaction helpers", () => {
+  it("redaction helpers", async () => {
     expect(maskEmailsInText("escribe a ana.lopez@hotmail.com o a b@x.mx")).toBe("escribe a a***@hotmail.com o a b***@x.mx");
     expect(maskEmailsInText(maskEmailsInText("ana@x.com"))).toBe("a***@x.com");
     expect(redactForLLM("pedido #MX-1234 de a***@x.com, guía EST999888, tel +52 55 1234 5678, 5 litros"))
@@ -280,7 +280,7 @@ describe("refund / cancel / address change", () => {
     "quiero un reembolso", "Quiero que me devuelvan mi dinero", "necesito cancelar mi pedido 1234", "quiero cambiar la dirección de envío",
     "I want a refund", "please cancel my order",
   ])("hands off to a person: %s", async (text) => {
-    tenantId = setupTenant();
+    tenantId = await setupTenant();
     const { deps, llmCalls } = makeDeps();
     const r = await handleInbound(ev(text), deps);
     expect(r).toMatchObject({ escalated: true, reason: "human_request" });
@@ -325,7 +325,7 @@ describe("urgent wording for safety/legal", () => {
     const { deps } = makeDeps({ now: () => SUNDAY });
     const r = await handleInbound(ev("I will contact my lawyer"), deps);
     expect(r.text).toMatch(/flagged your case as urgent/);
-    tenantId = setupTenant();
+    tenantId = await setupTenant();
     const r2 = await handleInbound(ev("Voy a ir a la Profeco"), makeDeps().deps);
     expect(r2.text).toMatch(/Marcamos tu caso como urgente/);
   });
