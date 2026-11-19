@@ -1,6 +1,8 @@
 # Momentia / CHEFMAN SaaS
 
-Read first: `proposals/00-project-brief.md`, then `platform/AGENTS.md` (Next.js version has breaking changes: read `platform/node_modules/next/dist/docs/` before coding).
+**Direction (2026-11-19):** generic multi-tenant SaaS (Chefman is only the test brand). MVP: Supabase, Telegram channel, Claude Haiku, white-label branding. Plan: `platform/docs/SAAS_MVP_PLAN.md`; mockups: `design/mockups/`.
+
+Read first: `platform/docs/SAAS_MVP_PLAN.md`, `proposals/00-project-brief.md` (original Chefman brief, historical), then `platform/AGENTS.md` (Next.js version has breaking changes: read `platform/node_modules/next/dist/docs/` before coding).
 
 ## Commands (run in `platform/`)
 `npm run typecheck && npm run lint && npm test` (unit + e2e). `npm run backup` / `purge` / `delete-customer` / `set-password` are operational scripts: do not run them against real data without approval.
