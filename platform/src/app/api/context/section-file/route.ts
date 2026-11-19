@@ -2,7 +2,7 @@
 // Same checks as /api/sources/upload (same-origin, session, rate limit, type/size/magic bytes); the file is stored
 // as a normal `sources` row so extraction and indexing are shared, and the section switches to file mode.
 import { NextResponse } from "next/server";
-import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { getData } from "@/lib/data";
 import { indexSource } from "@/lib/context/index-source";
 import { deleteSourceAndLinks } from "@/lib/context/section-index";
@@ -16,7 +16,7 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   const bad = checkSameOrigin(req); if (bad) return bad;
   let session;
-  try { session = await requireSession(); } catch (e) { if (e instanceof Response) return e; throw e; }
+  try { session = await requireRole("admin"); } catch (e) { if (e instanceof Response) return e; throw e; }
   // Shares the upload budget with the Sources screen.
   const limited = await limitOr429(`upload:${session.tenantId}`, 30, 60 * 60_000); if (limited) return limited;
 

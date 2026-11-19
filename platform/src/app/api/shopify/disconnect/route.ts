@@ -5,7 +5,7 @@ import { checkSameOrigin } from "@/lib/security/origin";
 
 export async function POST(req: Request) {
   const bad = checkSameOrigin(req); if (bad) return bad;
-  const tenantId = await tenantOr401();
+  const tenantId = await tenantOr401("admin");
   if (typeof tenantId !== "string") return tenantId;
   const data = getData();
   await data.addons.save(tenantId, "shopify", { status: "disconnected", publicInfo: {} }); // also wipes the secrets

@@ -1,6 +1,6 @@
 "use server";
 import { z } from "zod";
-import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { getData } from "@/lib/data";
 import { serializeBusinessHours, storableCustomText } from "@/lib/context/settings";
 
@@ -28,7 +28,7 @@ const schema = z.object({
 export type SaveToneResult = { ok: true; greeting: string; fallbackMessage: string } | { ok: false; error: "invalid" };
 
 export async function saveToneAction(input: unknown): Promise<SaveToneResult> {
-  const s = await requireSession();
+  const s = await requireRole("admin");
   const p = schema.safeParse(input);
   if (!p.success) return { ok: false, error: "invalid" };
   const d = p.data;

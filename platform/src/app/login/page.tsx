@@ -1,11 +1,15 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { getLocale, makeT, type Dict } from "@/lib/i18n";
 import { shellDict } from "@/lib/shell-dict";
 import { login } from "@/lib/auth";
+import { authBackend } from "@/lib/auth/backend";
+import { safeNext, withNext } from "@/lib/auth/redirect";
 import { ensureSeed } from "@/lib/seed";
 import { clientIp } from "@/lib/security/client-ip";
 import { Button, Card, Field, inputCls } from "@/components/ui";
+import { AuthCard, Notice, linkCls } from "./AuthCard";
 
 // Generic hint shown with the error: never says which field was wrong or that the account is locked.
 const loginDict: Dict = {
@@ -13,7 +17,16 @@ const loginDict: Dict = {
   en: { "login.hint": "After several failed attempts, wait 15 minutes before trying again." },
 };
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+const NOTICES: Record<string, string> = { confirmed: "login.confirmed", link_invalid: "login.linkInvalid", password_changed: "login.passwordChanged" };
+
+type Search = { error?: string; next?: string; notice?: string };
+
+export default async function LoginPage({ searchParams }: { searchParams: Promise<Search> }) {
+  return authBackend() === "supabase" ? SupabaseLogin({ searchParams }) : LocalLogin({ searchParams });
+}
+
+/** DATA_BACKEND=sqlite (default): unchanged local email + password login. */
+async function LocalLogin({ searchParams }: { searchParams: Promise<Search> }) {
   const locale = await getLocale();
   const t = makeT(shellDict, locale);
   const tl = makeT(loginDict, locale);
@@ -42,5 +55,38 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </form>
       </Card>
     </main>
+  );
+}
+
+/** DATA_BACKEND=supabase: Supabase Auth email + password. */
+async function SupabaseLogin({ searchParams }: { searchParams: Promise<Search> }) {
+  const t = makeT(shellDict, await getLocale());
+  const { error, next, notice } = await searchParams;
+  const nextPath = safeNext(next);
+  async function action(form: FormData) {
+    "use server";
+    const [{ createSupabaseServerClient }, { signIn }] = await Promise.all([
+      import("@/lib/auth/supabase-server"), import("@/lib/auth/supabase-account"),
+    ]);
+    const back = safeNext(form.get("next"));
+    const { ok } = await signIn(await createSupabaseServerClient(), { email: form.get("email"), password: form.get("password") });
+    redirect(ok ? back : withNext("/login?error=1", back));
+  }
+  const noticeKey = notice ? NOTICES[notice] : undefined;
+  return (
+    <AuthCard title={t("login.title")}>
+      {noticeKey && <Notice tone={notice === "link_invalid" ? "error" : "info"}>{t(noticeKey)}</Notice>}
+      <form action={action} className="space-y-4">
+        <input type="hidden" name="next" value={nextPath} />
+        <Field label={t("login.email")}><input name="email" type="email" required autoFocus autoComplete="username" maxLength={320} className={inputCls} /></Field>
+        <Field label={t("login.password")}><input name="password" type="password" required autoComplete="current-password" maxLength={1024} className={inputCls} /></Field>
+        {error && <p role="alert" className="text-sm text-danger">{t("login.errorSupabase")}</p>}
+        <Button type="submit" size="lg" className="w-full">{t("login.submit")}</Button>
+      </form>
+      <div className="mt-4 space-y-2 text-center text-sm">
+        <p><Link href="/login/forgot" className={linkCls}>{t("login.forgot")}</Link></p>
+        <p className="text-muted">{t("login.noAccount")} <Link href={withNext("/signup", nextPath)} className={linkCls}>{t("login.signupLink")}</Link></p>
+      </div>
+    </AuthCard>
   );
 }

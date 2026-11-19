@@ -21,7 +21,7 @@ const Cc = z.object({
 
 export async function POST(req: Request) {
   const bad = checkSameOrigin(req); if (bad) return bad;
-  const tenantId = await tenantOr401();
+  const tenantId = await tenantOr401("admin");
   if (typeof tenantId !== "string") return tenantId;
   const limited = await limitOr429(`shopify-manual:${tenantId}`, 10, 15 * 60_000); if (limited) return limited;
   const raw = await req.json().catch(() => null);

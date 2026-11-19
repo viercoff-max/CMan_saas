@@ -1,7 +1,7 @@
 "use server";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { getSession } from "@/lib/auth";
+import { assertRole, getSession } from "@/lib/auth";
 import { DataConflictError, getData } from "@/lib/data";
 import { testChannelCredentials, type GraphFailure } from "./graph-test";
 
@@ -25,6 +25,7 @@ export type ConnectResult = { ok: true; name: string } | { ok: false; error: Gra
 export async function connectChannel(channel: string, input: unknown): Promise<ConnectResult> {
   const s = await getSession();
   if (!s || !isCh(channel)) return { ok: false, error: "auth" };
+  assertRole(s, "admin"); // agents: 403
   const p = Schemas[channel].safeParse(input);
   if (!p.success) return { ok: false, error: "invalid" };
   const d = p.data as { externalId: string; accessToken: string; wabaId?: string };
@@ -70,6 +71,7 @@ export async function connectChannel(channel: string, input: unknown): Promise<C
 export async function disconnectChannel(channel: string): Promise<{ ok: boolean }> {
   const s = await getSession();
   if (!s || !isCh(channel)) return { ok: false };
+  assertRole(s, "admin"); // agents: 403
   const data = getData();
   await data.channels.save(s.tenantId, channel, { status: "disconnected", publicInfo: {} });
   await data.secrets.clear(s.tenantId, "channel", channel);

@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { getData } from "@/lib/data";
 import { CONTEXT_SECTION_KEYS, type ContextSectionKey } from "@/lib/types";
 import { indexSource, reindexSection } from "@/lib/context";
@@ -22,7 +22,7 @@ export type SectionActionResult = { ok: boolean; error?: string };
 
 /** Saves every section whose text or mode changed and re-chunks it. tenantId always comes from the session. */
 export async function saveContextAction(input: unknown): Promise<SaveContextResult> {
-  const s = await requireSession();
+  const s = await requireRole("admin");
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, changed: 0 };
   const data = getData();
@@ -47,7 +47,7 @@ export async function saveContextAction(input: unknown): Promise<SaveContextResu
 
 /** "Quitar": deletes the section file (file on disk, source row, chunks) and goes back to the typed text. */
 export async function removeSectionFileAction(input: unknown): Promise<SectionActionResult> {
-  const s = await requireSession();
+  const s = await requireRole("admin");
   const p = z.object({ key: sectionKey }).safeParse(input);
   if (!p.success) return { ok: false, error: "invalid" };
   const data = getData();
@@ -62,7 +62,7 @@ export async function removeSectionFileAction(input: unknown): Promise<SectionAc
 
 /** Links or unlinks one existing Data source to a section ("Complementar con fuentes de datos"). */
 export async function setSectionSourceAction(input: unknown): Promise<SectionActionResult> {
-  const s = await requireSession();
+  const s = await requireRole("admin");
   const p = z.object({ key: sectionKey, sourceId: z.uuid(), linked: z.boolean() }).safeParse(input);
   if (!p.success) return { ok: false, error: "invalid" };
   const { key, sourceId, linked } = p.data;
@@ -90,7 +90,7 @@ const linkSchema = z.object({
 
 /** "Agregar enlace": creates a link source, links it to the section and indexes it in one step. */
 export async function addSectionLinkAction(input: unknown): Promise<SectionActionResult & { id?: string }> {
-  const s = await requireSession();
+  const s = await requireRole("admin");
   const p = linkSchema.safeParse(input);
   if (!p.success) return { ok: false, error: "invalid_url" };
   if (!(await hit(`section-link:${s.tenantId}`, 30, 60 * 60_000)).ok) return { ok: false, error: "rate_limited" };

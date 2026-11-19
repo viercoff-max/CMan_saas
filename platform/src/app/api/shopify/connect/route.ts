@@ -9,7 +9,7 @@ import { cookieSecure } from "@/lib/auth";
 
 export async function POST(req: Request) {
   const bad = checkSameOrigin(req); if (bad) return bad;
-  const tenantId = await tenantOr401();
+  const tenantId = await tenantOr401("admin");
   if (typeof tenantId !== "string") return tenantId;
   const limited = await limitOr429(`shopify-connect:${tenantId}`, 10, 15 * 60_000); if (limited) return limited;
   if (!oauthConfigured()) return json({ error: "oauth_not_configured" }, 400);

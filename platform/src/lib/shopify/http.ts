@@ -1,12 +1,12 @@
 // Route helpers: session -> tenant (never from the request body), JSON responses.
-import { requireSession } from "../auth";
+import { requireRole, requireSession, type Role } from "../auth";
 
 export const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-/** Returns the tenantId, or a Response (401) the route must return as is. */
-export async function tenantOr401(): Promise<string | Response> {
-  try { return (await requireSession()).tenantId; } catch (e) {
+/** Returns the tenantId, or a Response (401, or 403 when `minRole` is not met) the route must return as is. */
+export async function tenantOr401(minRole?: Role): Promise<string | Response> {
+  try { return (await (minRole ? requireRole(minRole) : requireSession())).tenantId; } catch (e) {
     if (e instanceof Response) return e;
     throw e;
   }

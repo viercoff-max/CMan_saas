@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { getData } from "@/lib/data";
 import { indexSource } from "@/lib/context/index-source";
 import { deleteSourceAndLinks } from "@/lib/context/section-index";
@@ -17,7 +17,7 @@ const linkSchema = z.object({
 const idSchema = z.object({ id: z.uuid() });
 
 export async function addLinkAction(input: unknown): Promise<ActionResult> {
-  const s = await requireSession();
+  const s = await requireRole("admin");
   const p = linkSchema.safeParse(input);
   if (!p.success) return { ok: false, error: "invalid_url" };
   const url = new URL(p.data.url);
@@ -31,7 +31,7 @@ export async function addLinkAction(input: unknown): Promise<ActionResult> {
 }
 
 export async function syncSourceAction(input: unknown): Promise<ActionResult> {
-  const s = await requireSession();
+  const s = await requireRole("admin");
   const p = idSchema.safeParse(input);
   if (!p.success) return { ok: false, error: "not_found" };
   const r = await indexSource(s.tenantId, p.data.id); // also refreshes the Context sections linked to it
@@ -41,7 +41,7 @@ export async function syncSourceAction(input: unknown): Promise<ActionResult> {
 }
 
 export async function deleteSourceAction(input: unknown): Promise<ActionResult> {
-  const s = await requireSession();
+  const s = await requireRole("admin");
   const p = idSchema.safeParse(input);
   if (!p.success) return { ok: false, error: "not_found" };
   const data = getData();
