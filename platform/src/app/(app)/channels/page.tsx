@@ -2,6 +2,8 @@ import { getSession, hasRole } from "@/lib/auth";
 import { getData } from "@/lib/data";
 import { maskTelegramToken, telegramWebhookReachable } from "@/lib/channels/telegram";
 import type { TelegramChannelSecrets } from "@/lib/channels/telegram-secret";
+import { whatsappWebhookUrl, type WhatsAppChannelSecrets } from "@/lib/channels/whatsapp-own";
+import { PLATFORM_BRAND } from "@/lib/platform/brand";
 import { isChannelAvailable, whatsappPlatformReady } from "@/lib/platform/channels";
 import { ChannelsClient, type AccountView, type TelegramView, type WhatsAppView } from "./ChannelsClient";
 
@@ -31,11 +33,21 @@ export default async function ChannelsPage() {
     canEdit: hasRole(s.role, "admin"),
   };
 
-  // WhatsApp (beta): a form only when the platform Meta app is wired (META_APP_SECRET + META_VERIFY_TOKEN).
+  // WhatsApp (beta): always available with the business's OWN Meta app (manual). The platform app is optional
+  // (META_APP_SECRET + META_VERIFY_TOKEN). The per-tenant webhook URL and verify token are shown to admins only.
   const wa = await data.channels.get(s.tenantId, "whatsapp");
+  const waConnected = wa.status === "connected";
+  const canEdit = hasRole(s.role, "admin");
+  const ownApp = waConnected && wa.publicInfo.mode === "own_app";
+  const waSecrets = ownApp && canEdit ? await data.secrets.get<WhatsAppChannelSecrets>(s.tenantId, "channel", "whatsapp") : null;
   const whatsapp: WhatsAppView = {
-    enabled: whatsappPlatformReady(), status: wa.status, canEdit: hasRole(s.role, "admin"),
-    name: wa.status === "connected" ? String(wa.publicInfo.displayName ?? wa.publicInfo.externalId ?? "") : "",
+    enabled: true, platformReady: whatsappPlatformReady(), status: wa.status, canEdit,
+    name: waConnected ? String(wa.publicInfo.displayName ?? wa.publicInfo.externalId ?? "") : "",
+    mode: ownApp ? "own_app" : waConnected ? "platform" : "none",
+    webhook: wa.publicInfo.webhook === "ok" ? "ok" : "pending",
+    webhookUrl: canEdit ? whatsappWebhookUrl(process.env.PUBLIC_URL, wa.webhookId) : "",
+    verifyToken: waSecrets?.verifyToken ?? "",
+    supportEmail: PLATFORM_BRAND.supportEmail ?? PLATFORM_BRAND.privacyContactEmail ?? "",
   };
 
   // The platform's Meta webhook URL and META_VERIFY_TOKEN are platform config: never rendered to tenants (L7).

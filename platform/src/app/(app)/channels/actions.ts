@@ -9,19 +9,22 @@ import {
   type TelegramFailure,
 } from "@/lib/channels/telegram";
 import { newTelegramWebhookSecret, type TelegramChannelSecrets } from "@/lib/channels/telegram-secret";
+import { APP_SECRET_SHAPE, newWhatsAppVerifyToken, type WhatsAppChannelSecrets } from "@/lib/channels/whatsapp-own";
+import { whatsappPlatformReady } from "@/lib/platform/channels";
 
 const id = z.string().trim().min(3).max(64).regex(/^[A-Za-z0-9_.-]+$/);
 const token = z.string().trim().min(10).max(1024);
 
 const Schemas = {
-  whatsapp: z.object({ externalId: id, accessToken: token, wabaId: id }),
+  // appSecret: the business's OWN Meta app (manual mode). Empty = the platform's Meta app (when configured).
+  whatsapp: z.object({ externalId: id, accessToken: token, wabaId: id, appSecret: z.string().trim().max(200).optional() }),
   instagram: z.object({ externalId: id, accessToken: token }),
   messenger: z.object({ externalId: id, accessToken: token }),
 } as const;
 type Ch = keyof typeof Schemas;
 const isCh = (c: string): c is Ch => c in Schemas;
 
-export type ConnectResult = { ok: true; name: string } | { ok: false; error: GraphFailure | "invalid" | "auth" | "in_use" };
+export type ConnectResult = { ok: true; name: string } | { ok: false; error: GraphFailure | "invalid" | "auth" | "in_use" | "app_secret" };
 
 /**
  * Tests the credentials against the Graph API first (and subscribes the app to the account's webhooks); stores the
@@ -33,7 +36,10 @@ export async function connectChannel(channel: string, input: unknown): Promise<C
   assertRole(s, "admin"); // agents: 403
   const p = Schemas[channel].safeParse(input);
   if (!p.success) return { ok: false, error: "invalid" };
-  const d = p.data as { externalId: string; accessToken: string; wabaId?: string };
+  const d = p.data as { externalId: string; accessToken: string; wabaId?: string; appSecret?: string };
+  // WhatsApp: own-app mode when an App Secret is given; it is REQUIRED while the platform Meta app is not configured.
+  const appSecret = channel === "whatsapp" ? (d.appSecret ?? "").trim() : "";
+  if (channel === "whatsapp" && (appSecret ? !APP_SECRET_SHAPE.test(appSecret) : !whatsappPlatformReady())) return { ok: false, error: "app_secret" };
 
   // One Page / IG account / WhatsApp number belongs to ONE brand (webhook routing). Checked before calling Graph, and the
   // unique index uq_channel_external (db.ts) is the race-proof backstop below.
@@ -50,15 +56,23 @@ export async function connectChannel(channel: string, input: unknown): Promise<C
     return { ok: false, error: test.error };
   }
 
+  const data0 = channel === "whatsapp" && appSecret ? await data.secrets.get<WhatsAppChannelSecrets>(s.tenantId, "channel", "whatsapp") : null;
   const secrets = channel === "whatsapp"
-    ? { phoneNumberId: d.externalId, accessToken: d.accessToken, wabaId: d.wabaId }
+    ? {
+      phoneNumberId: d.externalId, accessToken: d.accessToken, wabaId: d.wabaId,
+      // Reconnecting keeps the verify token already pasted in the Meta app; a first connection gets a new one.
+      ...(appSecret ? { appSecret, verifyToken: data0?.verifyToken || newWhatsAppVerifyToken() } : {}),
+    }
     : channel === "instagram"
       ? { igId: d.externalId, accessToken: d.accessToken, ...(test.igLogin ? { igLogin: "1" } : {}) }
       : { pageId: d.externalId, accessToken: d.accessToken };
   try {
     // Status first: a conflict (another tenant owns this account) must not leave our token stored.
     await data.channels.save(s.tenantId, channel, {
-      status: "connected", publicInfo: { externalId: d.externalId, displayName: test.name },
+      status: "connected", publicInfo: {
+        externalId: d.externalId, displayName: test.name,
+        ...(channel === "whatsapp" ? { mode: appSecret ? "own_app" : "platform", webhook: appSecret ? "pending" : "ok" } : {}),
+      },
     });
   } catch (e) {
     if (e instanceof DataConflictError) {

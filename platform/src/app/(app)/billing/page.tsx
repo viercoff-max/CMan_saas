@@ -86,6 +86,17 @@ export default async function BillingPage() {
         })}
       </ul>
       <PlanChange t={t} />
+
+      <section className="mt-8 rounded-2xl border border-dashed border-line bg-surface p-5" aria-labelledby="assisted-setup" data-testid="assisted-setup">
+        <h2 id="assisted-setup" className="text-base font-semibold text-ink">{t("assist.title")}</h2>
+        <p className="mt-1 text-sm text-muted">{t("assist.body")}</p>
+        <ul className="mt-3 space-y-1 text-sm text-ink">
+          {[1, 2, 3].map((i) => <li key={i} className="flex gap-2"><span aria-hidden className="text-ok">✓</span>{t(`assist.i${i}`)}</li>)}
+        </ul>
+        <p className="mt-3 text-sm text-muted">{contactEmail()
+          ? <>{t("assist.ask")} <a className="font-medium text-brand underline underline-offset-2" href={`mailto:${contactEmail()}?subject=${encodeURIComponent(t("assist.subject"))}`}>{contactEmail()}</a></>
+          : t("assist.soon")}</p>
+      </section>
     </>
   );
 }

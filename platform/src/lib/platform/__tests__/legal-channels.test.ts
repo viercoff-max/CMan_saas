@@ -9,16 +9,18 @@ import { billingDict } from "@/app/(app)/billing/dict";
 import { LegalDocView } from "@/app/(marketing)/_components/LegalDocView";
 
 describe("channel availability (single source)", () => {
-  it("MVP: Telegram is the only live channel; Meta channels are coming soon", () => {
-    expect(availableChannels()).toEqual(["telegram"]);
-    expect(comingSoonChannels()).toEqual(["whatsapp", "instagram", "messenger"]);
-    expect(listNames(comingSoonChannels(), "es")).toBe("WhatsApp, Instagram y Messenger");
+  it("MVP: Telegram is live, WhatsApp is beta (own Meta app), Instagram and Messenger are coming soon", () => {
+    expect(availableChannels()).toEqual(["telegram", "whatsapp"]);
+    expect(CHANNEL_AVAILABILITY.whatsapp).toBe("beta");
+    expect(comingSoonChannels()).toEqual(["instagram", "messenger"]);
+    expect(listNames(comingSoonChannels(), "es")).toBe("Instagram y Messenger");
   });
   it("the public landing and the billing copy say the same thing", () => {
     expect(landing.es.channels).toEqual(channelChips("es"));
-    for (const ch of landing.es.channels) expect(ch.state).toBe(ch.name === "Telegram" ? "Disponible" : "Próximamente");
+    for (const ch of landing.es.channels) expect(ch.state).toBe(ch.name === "Telegram" ? "Disponible" : ch.name === "WhatsApp" ? "Beta" : "Próximamente");
     for (const [c, state] of Object.entries(CHANNEL_AVAILABILITY)) if (state === "soon") expect(billingDict.es["plan.pro.f1"]).toContain(c === "whatsapp" ? "WhatsApp" : c === "instagram" ? "Instagram" : "Messenger");
     expect(billingDict.es["plan.pro.f1"]).toMatch(/próximamente/);
+    expect(billingDict.es["plan.pro.f1"]).toContain("WhatsApp (beta)");
   });
 });
 

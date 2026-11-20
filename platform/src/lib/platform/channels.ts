@@ -4,11 +4,12 @@
 import type { Locale } from "../i18n-shared";
 
 export type PublicChannel = "telegram" | "whatsapp" | "instagram" | "messenger";
-export type ChannelAvailability = "available" | "soon";
+/** "beta" = usable today (connect form in /channels) but still being polished. */
+export type ChannelAvailability = "available" | "beta" | "soon";
 
 export const CHANNEL_AVAILABILITY: Readonly<Record<PublicChannel, ChannelAvailability>> = {
   telegram: "available",
-  whatsapp: "soon",
+  whatsapp: "beta", // manual connection with the business's own Meta app (lib/channels/whatsapp-own)
   instagram: "soon",
   messenger: "soon",
 };
@@ -18,13 +19,13 @@ export const CHANNEL_NAMES: Readonly<Record<PublicChannel, string>> = {
   telegram: "Telegram", whatsapp: "WhatsApp", instagram: "Instagram", messenger: "Messenger",
 };
 
-export const isChannelAvailable = (c: PublicChannel) => CHANNEL_AVAILABILITY[c] === "available";
+export const isChannelAvailable = (c: PublicChannel) => CHANNEL_AVAILABILITY[c] !== "soon";
 export const availableChannels = () => CHANNEL_ORDER.filter(isChannelAvailable);
-export const comingSoonChannels = () => CHANNEL_ORDER.filter((c) => !isChannelAvailable(c));
+export const comingSoonChannels = () => CHANNEL_ORDER.filter((c) => CHANNEL_AVAILABILITY[c] === "soon");
 
 export const AVAILABILITY_LABEL: Readonly<Record<Locale, Record<ChannelAvailability, string>>> = {
-  es: { available: "Disponible", soon: "Próximamente" },
-  en: { available: "Available", soon: "Coming soon" },
+  es: { available: "Disponible", beta: "Beta", soon: "Próximamente" },
+  en: { available: "Available", beta: "Beta", soon: "Coming soon" },
 };
 
 /** "WhatsApp, Instagram y Messenger" / "WhatsApp, Instagram and Messenger". */

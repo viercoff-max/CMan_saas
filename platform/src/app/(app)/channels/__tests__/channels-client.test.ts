@@ -82,4 +82,24 @@ describe("channels page", () => {
     expect(whatsappPlatformReady({ META_APP_SECRET: " ", META_VERIFY_TOKEN: "y" })).toBe(false);
     expect(whatsappPlatformReady({ META_APP_SECRET: "x", META_VERIFY_TOKEN: "y" })).toBe(true);
   });
+
+  it("own-app WhatsApp: admins see the webhook URL + verify token to paste in Meta, the App Secret field and the paid-support offer", () => {
+    const html = render(tgNoBot, meta(), "es", {
+      enabled: true, platformReady: false, status: "connected", name: "Mi Tienda", canEdit: true, mode: "own_app", webhook: "pending",
+      webhookUrl: "https://app.example/api/webhooks/whatsapp/abc", verifyToken: "VerifyTok123", supportEmail: "",
+    });
+    expect(html).toContain("https://app.example/api/webhooks/whatsapp/abc");
+    expect(html).toContain("VerifyTok123");
+    expect(html).toContain(channelsDict.es["wa.hook.pending"]);
+    expect(html).toContain(channelsDict.es["f.whatsapp.secret"]);
+    expect(html).toContain("costo adicional");
+  });
+
+  it("own-app WhatsApp: agents never see the verify token or webhook details", () => {
+    const html = render(tgNoBot, meta(), "es", {
+      enabled: true, status: "connected", name: "Mi Tienda", canEdit: false, mode: "own_app", webhook: "ok", webhookUrl: "", verifyToken: "",
+    });
+    expect(html).not.toContain(channelsDict.es["wa.hook.title"]);
+    expect(html).not.toContain(channelsDict.es["f.whatsapp.secret"]);
+  });
 });

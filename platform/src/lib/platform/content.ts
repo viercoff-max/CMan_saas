@@ -62,10 +62,10 @@ export const draftBanner = {
 export const landing = {
   es: {
     metaTitle: "Un asistente que contesta a tus clientes",
-    metaDescription: "Responde a tus clientes en Telegram hoy (WhatsApp, Instagram y Messenger pronto), solo con la información de tu negocio, y pasa la conversación a una persona cuando hace falta.",
+    metaDescription: "Responde a tus clientes en Telegram y WhatsApp (Instagram y Messenger pronto), solo con la información de tu negocio, y pasa la conversación a una persona cuando hace falta.",
     eyebrow: "Para cualquier negocio",
     title: "Un asistente que contesta a tus clientes y te avisa cuando alguien necesita a una persona.",
-    lead: "Conecta tu bot de Telegram, cuéntale sobre tu negocio y deja que conteste las preguntas de siempre. Tú y tu equipo atienden lo demás desde un solo panel.",
+    lead: "Conecta tu bot de Telegram o tu WhatsApp, cuéntale sobre tu negocio y deja que conteste las preguntas de siempre. Tú y tu equipo atienden lo demás desde un solo panel.",
     ctaPrimary: "Crear cuenta",
     ctaSecondary: "Entrar",
     channelsTitle: "Canales",
@@ -83,17 +83,17 @@ export const landing = {
     steps: [
       "Crea tu cuenta y el perfil de tu negocio.",
       "Escribe o sube la información que el asistente debe usar.",
-      "Conecta tu bot de Telegram y pruébalo en el simulador.",
+      "Conecta tu bot de Telegram o tu WhatsApp y pruébalo en el simulador.",
     ],
     honest: "Estamos en una etapa temprana: todavía no publicamos precios ni cifras de clientes.",
     pricingLink: "Ver planes",
   },
   en: {
     metaTitle: "An assistant that answers your customers",
-    metaDescription: "Answer your customers on Telegram today (WhatsApp, Instagram and Messenger soon), only from your business information, and hand the conversation to a person when needed.",
+    metaDescription: "Answer your customers on Telegram and WhatsApp (Instagram and Messenger soon), only from your business information, and hand the conversation to a person when needed.",
     eyebrow: "For any business",
     title: "An assistant that answers your customers and tells you when someone needs a person.",
-    lead: "Connect your Telegram bot, tell it about your business and let it answer the usual questions. You and your team handle the rest from one panel.",
+    lead: "Connect your Telegram bot or your WhatsApp, tell it about your business and let it answer the usual questions. You and your team handle the rest from one panel.",
     ctaPrimary: "Create account",
     ctaSecondary: "Sign in",
     channelsTitle: "Channels",
@@ -111,7 +111,7 @@ export const landing = {
     steps: [
       "Create your account and your business profile.",
       "Write or upload the information the assistant should use.",
-      "Connect your Telegram bot and try it in the simulator.",
+      "Connect your Telegram bot or your WhatsApp and try it in the simulator.",
     ],
     honest: "We are at an early stage: we do not publish prices or customer figures yet.",
     pricingLink: "See plans",
@@ -128,11 +128,11 @@ export const pricing = {
     priceTbd: "Precio por definir",
     cta: "Crear cuenta",
     plans: [
-      { name: "Gratis", for: "Para probar con tu negocio.", items: ["Un canal (Telegram)", "Asistente con tu información", "Bandeja y simulador", "Uso de IA con un tope mensual bajo"] },
+      { name: "Gratis", for: "Para probar con tu negocio.", items: ["Un canal (Telegram o WhatsApp)", "Asistente con tu información", "Bandeja y simulador", "Uso de IA con un tope mensual bajo"] },
       { name: "Pro", for: "Para un negocio con equipo.", items: ["Todo lo de Gratis", "Más uso de IA al mes", "Varios miembros del equipo", "Tu marca en el panel"] },
       { name: "Negocio", for: "Para más volumen y más canales.", items: ["Todo lo de Pro", "El mayor tope de IA", "Más canales cuando estén disponibles", "Soporte prioritario"] },
     ],
-    note: "Lo que incluye cada plan puede cambiar antes del lanzamiento.",
+    note: "Lo que incluye cada plan puede cambiar antes del lanzamiento. ¿No quieres hacer la parte técnica? Ofrecemos configuración asistida (WhatsApp, Telegram, Shopify y tu contexto) como soporte con costo adicional.",
   },
   en: {
     metaTitle: "Pricing",
@@ -142,11 +142,11 @@ export const pricing = {
     priceTbd: "Price to be defined",
     cta: "Create account",
     plans: [
-      { name: "Free", for: "To try it with your business.", items: ["One channel (Telegram)", "Assistant with your information", "Inbox and simulator", "AI usage with a low monthly cap"] },
+      { name: "Free", for: "To try it with your business.", items: ["One channel (Telegram or WhatsApp)", "Assistant with your information", "Inbox and simulator", "AI usage with a low monthly cap"] },
       { name: "Pro", for: "For a business with a team.", items: ["Everything in Free", "More AI usage per month", "Several team members", "Your brand in the panel"] },
       { name: "Business", for: "For more volume and more channels.", items: ["Everything in Pro", "The highest AI cap", "More channels as they become available", "Priority support"] },
     ],
-    note: "What each plan includes may change before launch.",
+    note: "What each plan includes may change before launch. Rather skip the technical part? We offer assisted setup (WhatsApp, Telegram, Shopify and your context) as support for an additional fee.",
   },
 } satisfies Record<Locale, unknown>;
 
@@ -235,7 +235,7 @@ export const terms: Record<Locale, LegalDoc> = {
     description: "Borrador de los términos de uso de {brand}.",
     intro: "Estos términos regulan el uso de {brand} por los negocios que crean una cuenta y por sus equipos. Al crear una cuenta los aceptas.",
     sections: [
-      { h: "1. El servicio", p: ["{brand}, operado por {entity}, es un asistente que contesta a los clientes de un negocio en canales de mensajería (hoy Telegram; WhatsApp, Instagram y Messenger más adelante) usando la información que el negocio le da, y un panel para que el equipo atienda las conversaciones."] },
+      { h: "1. El servicio", p: ["{brand}, operado por {entity}, es un asistente que contesta a los clientes de un negocio en canales de mensajería (hoy Telegram y WhatsApp; Instagram y Messenger más adelante) usando la información que el negocio le da, y un panel para que el equipo atienda las conversaciones."] },
       { h: "2. Cuentas", p: ["Debes dar datos verdaderos, cuidar tu contraseña y avisarnos de cualquier acceso no autorizado. El dueño del negocio decide quién entra a su equipo y con qué rol."] },
       { h: "3. Responsabilidades del negocio", p: [
         "Eres responsable de la información que cargas, de lo que tu equipo responde y de cumplir las leyes que te aplican (protección de datos, consumidor, publicidad) frente a tus clientes, incluido darles tu propio aviso de privacidad.",
@@ -255,7 +255,7 @@ export const terms: Record<Locale, LegalDoc> = {
     description: "Draft terms of use for {brand}.",
     intro: "These terms govern the use of {brand} by the businesses that create an account and by their teams. By creating an account you accept them.",
     sections: [
-      { h: "1. The service", p: ["{brand}, operated by {entity}, is an assistant that answers a business's customers on messaging channels (Telegram today; WhatsApp, Instagram and Messenger later) using the information the business gives it, plus a panel for the team to handle conversations."] },
+      { h: "1. The service", p: ["{brand}, operated by {entity}, is an assistant that answers a business's customers on messaging channels (Telegram and WhatsApp today; Instagram and Messenger later) using the information the business gives it, plus a panel for the team to handle conversations."] },
       { h: "2. Accounts", p: ["You must give true information, keep your password safe and tell us about any unauthorised access. The business owner decides who joins the team and with which role."] },
       { h: "3. The business's responsibilities", p: [
         "You are responsible for the information you upload, for what your team replies and for complying with the laws that apply to you (data protection, consumer, advertising) towards your customers, including giving them your own privacy notice.",

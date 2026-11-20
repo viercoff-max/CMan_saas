@@ -10,8 +10,14 @@ type Ch = "whatsapp" | "instagram" | "messenger";
 /** `available` comes from src/lib/platform/channels.ts (single source of truth with the public site and billing). */
 export interface AccountView { channel: Ch; status: "connected" | "disconnected" | "error"; name: string; available: boolean }
 
-/** WhatsApp (beta). `enabled` = the platform Meta app is wired (server-side env check); otherwise "Próximamente". */
-export interface WhatsAppView { enabled: boolean; status: "connected" | "disconnected" | "error"; name: string; canEdit: boolean }
+/**
+ * WhatsApp (beta). Manual mode = the business's OWN Meta app (App Secret + per-tenant webhook URL and verify token);
+ * platform mode = the platform's Meta app, only when `platformReady`. `webhookUrl`/`verifyToken` reach admins only.
+ */
+export interface WhatsAppView {
+  enabled: boolean; platformReady?: boolean; status: "connected" | "disconnected" | "error"; name: string; canEdit: boolean;
+  mode?: "own_app" | "platform" | "none"; webhook?: "ok" | "pending"; webhookUrl?: string; verifyToken?: string; supportEmail?: string;
+}
 
 export interface TelegramView {
   status: "connected" | "disconnected" | "error"; username: string; connectedAt: string;
@@ -209,28 +215,52 @@ function TelegramCard({ v }: { v: TelegramView }) {
   );
 }
 
+/** Read-only value with a copy button (webhook URL, verify token). */
+function CopyRow({ label, value }: { label: string; value: string }) {
+  const t = useT(channelsDict);
+  const [done, setDone] = useState(false);
+  return (
+    <div>
+      <p className="mb-1 text-xs font-medium text-muted">{label}</p>
+      <div className="flex items-center gap-2">
+        <code className="min-w-0 flex-1 break-all rounded-lg bg-surface px-3 py-2 font-mono text-xs text-ink">{value}</code>
+        <Button type="button" variant="secondary" className="min-h-[44px] shrink-0"
+          onClick={() => { void navigator.clipboard?.writeText(value).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }); }}>
+          {done ? t("copied") : t("copy")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /**
- * WhatsApp Cloud API (beta): Phone number ID + WhatsApp Business account ID + permanent access token. connectChannel
- * tests them against Graph and subscribes the platform app to the account webhooks before saving (token encrypted).
+ * WhatsApp Cloud API (beta). The business fills everything by hand: phone number ID, WABA ID, permanent token and
+ * (own app) the App Secret. connectChannel tests them against Graph and subscribes the app before saving (encrypted).
+ * Then, in own-app mode, the card shows the webhook URL + verify token to paste in the business's Meta app.
  */
 function WhatsAppCard({ v }: { v: WhatsAppView }) {
   const t = useT(channelsDict);
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [form, setForm] = useState({ externalId: "", wabaId: "", accessToken: "" });
+  const [form, setForm] = useState({ externalId: "", wabaId: "", accessToken: "", appSecret: "" });
   const [msg, setMsg] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
   const [confirm, setConfirm] = useState(false);
-  const ids = { id: useId(), waba: useId(), token: useId(), hint: useId() };
+  const ids = { id: useId(), waba: useId(), token: useId(), secret: useId(), hint: useId() };
   const connected = v.status === "connected";
-  const ready = form.externalId.trim() && form.wabaId.trim() && form.accessToken.trim();
+  const needSecret = !v.platformReady;
+  const ready = form.externalId.trim() && form.wabaId.trim() && form.accessToken.trim() && (!needSecret || form.appSecret.trim());
 
   function save() {
     setMsg(null);
+    const ownApp = !!form.appSecret.trim();
     start(async () => {
       try {
         const r = await connectChannel("whatsapp", form);
-        if (r.ok) { setForm({ externalId: "", wabaId: "", accessToken: "" }); setMsg({ tone: "ok", text: t("saved", { name: r.name }) }); router.refresh(); }
-        else setMsg({ tone: "bad", text: t(`err.${r.error}`) });
+        if (r.ok) {
+          setForm({ externalId: "", wabaId: "", accessToken: "", appSecret: "" });
+          setMsg({ tone: "ok", text: ownApp ? `${t("saved", { name: r.name })} ${t("wa.savedNext")}` : t("saved", { name: r.name }) });
+          router.refresh();
+        } else setMsg({ tone: "bad", text: t(`err.${r.error}`) });
       } catch { setMsg({ tone: "bad", text: t("err.network") }); }
     });
   }
@@ -238,10 +268,11 @@ function WhatsAppCard({ v }: { v: WhatsAppView }) {
     setConfirm(false);
     start(async () => { await disconnectChannel("whatsapp"); setMsg(null); router.refresh(); });
   }
-  const field = (key: "externalId" | "wabaId" | "accessToken", id: string, label: string, help: string, secret = false) => (
+  const field = (key: keyof typeof form, id: string, label: string, help: string, secret = false) => (
     <div>
       <label htmlFor={id} className="mb-1 block text-sm font-medium text-ink">{label}</label>
-      <input id={id} required type={secret ? "password" : "text"} inputMode={secret ? undefined : "numeric"} spellCheck={false}
+      <input id={id} required={key !== "appSecret" || needSecret} type={secret ? "password" : "text"} spellCheck={false}
+        inputMode={key === "externalId" || key === "wabaId" ? "numeric" : undefined}
         autoComplete={secret ? "new-password" : "off"} aria-describedby={secret ? ids.hint : undefined}
         className={`${inputCls} min-h-[44px] font-mono text-base md:text-sm`} value={form[key]}
         onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))} />
@@ -260,6 +291,21 @@ function WhatsAppCard({ v }: { v: WhatsAppView }) {
       </div>
       <p className="mt-1 text-sm text-muted">{t("d.whatsapp")}</p>
       {connected && v.name && <p className="mt-3 rounded-xl bg-[var(--ok-bg,#ecfdf3)] p-3 text-sm text-ink">{t("connectedAs", { name: v.name })}</p>}
+
+      {connected && v.mode === "own_app" && v.canEdit && v.webhookUrl && (
+        <div className="mt-3 space-y-3 rounded-xl border border-line bg-canvas p-3" data-testid="wa-webhook">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-ink">{t("wa.hook.title")}</h4>
+            <Badge tone={v.webhook === "ok" ? "good" : "warn"}>{v.webhook === "ok" ? t("wa.hook.ok") : t("wa.hook.pending")}</Badge>
+          </div>
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-ink">
+            <li>{t("wa.hook.s1")}</li><li>{t("wa.hook.s2")}</li><li>{t("wa.hook.s3")}</li><li>{t("wa.hook.s4")}</li>
+          </ol>
+          <CopyRow label={t("wa.hook.url")} value={v.webhookUrl} />
+          {v.verifyToken && <CopyRow label={t("wa.hook.token")} value={v.verifyToken} />}
+        </div>
+      )}
+
       <p className="mt-3 rounded-xl bg-canvas p-3 text-sm text-muted">{t("wa.window")}</p>
       <div role="status" aria-live="polite">
         {msg && <p className={`mt-3 rounded-xl p-3 text-sm ${msg.tone === "ok" ? "bg-[var(--ok-bg,#ecfdf3)] text-[var(--ok,#15803d)]" : "bg-[var(--bad-bg,#fef2f2)] text-danger"}`}>{msg.text}</p>}
@@ -268,9 +314,11 @@ function WhatsAppCard({ v }: { v: WhatsAppView }) {
         <form className="mt-4 space-y-3 border-t border-line pt-4" autoComplete="off" onSubmit={(e) => { e.preventDefault(); save(); }}>
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted">{connected ? t("wa.howChange") : t("wa.how")}</h4>
           <p className="text-sm text-ink">{t("wa.intro")}</p>
+          <Help text={t("wa.app.help")} />
           {field("externalId", ids.id, t("f.whatsapp.id"), t("f.whatsapp.id.help"))}
           {field("wabaId", ids.waba, t("f.whatsapp.waba"), t("f.whatsapp.waba.help"))}
           {field("accessToken", ids.token, t("f.whatsapp.token"), t("f.whatsapp.token.help"), true)}
+          {field("appSecret", ids.secret, needSecret ? t("f.whatsapp.secret") : t("f.whatsapp.secretOptional"), t("f.whatsapp.secret.help"), true)}
           <span id={ids.hint} className="block text-xs text-muted">{`${t("tokenWarn")} ${t("f.secretHint")}`}</span>
           <div className="flex flex-wrap items-center justify-between gap-2">
             {connected ? <Button type="button" variant="ghost" className="min-h-[44px]" onClick={() => setConfirm(true)} disabled={pending}>{t("disconnect")}</Button> : <span />}
@@ -280,6 +328,12 @@ function WhatsAppCard({ v }: { v: WhatsAppView }) {
       ) : (
         <p className="mt-4 border-t border-line pt-4 text-sm text-muted">{t("wa.adminOnly")}</p>
       )}
+      <p className="mt-4 rounded-xl border border-dashed border-line p-3 text-sm text-ink" data-testid="wa-support">
+        {t("wa.support")}{" "}
+        {v.supportEmail
+          ? <a className="text-brand underline" href={`mailto:${v.supportEmail}?subject=${encodeURIComponent(t("wa.support.subject"))}`}>{v.supportEmail}</a>
+          : <a className="text-brand underline" href="/billing">{t("wa.support.link")}</a>}
+      </p>
       <ConfirmDialog open={confirm} title={t("wa.confirmTitle")} body={t("confirmDisconnect")} confirmLabel={t("disconnect")} cancelLabel={t("cancel")}
         onConfirm={disconnect} onCancel={() => setConfirm(false)} />
     </Card>
