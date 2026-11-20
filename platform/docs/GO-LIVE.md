@@ -293,3 +293,54 @@ For each channel, from a real customer account (not an admin of the app):
 - ngrok path-restriction syntax.
 - Current app-creation use-case names in the Meta dashboard.
 - Whether `pages_read_engagement` is still required.
+
+---
+
+## 10. Telegram (MVP channel)
+
+Verified against https://core.telegram.org/bots/api (Bot API 10.4, 2026-11-09) on 2026-11-19.
+
+**What you need:** a Telegram account and the app reachable on a public **HTTPS** address (step 1). Telegram only
+delivers webhooks to HTTPS on ports **443, 80, 88 or 8443**, with a valid certificate. `localhost` never works.
+No new `.env.local` variable: only `PUBLIC_URL` (must be that HTTPS address).
+
+**Tunnel rule.** Add this path to the tunnel ingress (`docs/RUNBOOK.md` section 3), next to the Meta one:
+`path: ^/api/webhooks/telegram/[A-Za-z0-9-]+$`. Nothing else becomes public.
+
+1. **Create the bot.** In Telegram open **@BotFather** (blue check mark), send `/newbot`, type the display name
+   (e.g. "Chefman Ayuda") and a username ending in `bot` (e.g. `ChefmanAyudaBot`). BotFather replies with the
+   **token** (`123456789:AAH...`). Treat it like a password. Existing bot: `/mybots` > your bot > **API Token**.
+2. **Connect.** In the app: **Canales > Telegram**, paste the token, press **Conectar y probar** (admin/owner only).
+   The app then, in this order: checks the token (`getMe`), saves the channel as connected (fails with
+   "Ese bot ya está conectado a otra marca" if another brand owns it), stores the token + a new random webhook secret
+   **encrypted**, and calls `setWebhook` with
+   `url = PUBLIC_URL/api/webhooks/telegram/<webhookId>`, `secret_token = <secret>`,
+   `allowed_updates = ["message","edited_message"]`, `drop_pending_updates = true`.
+   - If `PUBLIC_URL` is not public HTTPS, the bot is still saved and the card shows a warning. Once the tunnel is up and
+     `PUBLIC_URL` is updated (restart the app), press **Volver a registrar webhook** (this also rotates the secret).
+3. **Test.** Open `t.me/<your bot username>` on a phone, press **Start**: the assistant greets you. Send a question,
+   then a photo (it must say a person will review it and appear in **Mensajes** as needing a person).
+4. **Disconnect** (card > Desconectar): calls `deleteWebhook`, wipes the stored token and secret, marks the channel
+   disconnected. Revoking the token in BotFather (`/revoke`) is the owner's extra safety step if the token leaked.
+
+**Security (for the technical person).** Each bot has its own URL (`webhookId`, a public random uuid of the channel
+row). Every request must carry `X-Telegram-Bot-Api-Secret-Token` equal to that tenant's encrypted secret (constant-time
+compare); unknown id, disconnected bot, missing or wrong header -> **401**, so one brand's secret can never deliver into
+another brand. Bodies over 1 MB -> 413. The route answers 200 immediately and processes with `after()`.
+
+**Behaviour (MVP).**
+- Private chats only. Groups, supergroups, channel posts and messages from other bots are ignored.
+- Photos, voice notes, audio, video, video notes, GIFs, files, stickers, locations, venues and contacts become the usual
+  placeholders (`[Foto] caption`...) and are handed to a person. Files are never downloaded.
+- `/start` (also `/start <payload>`) is treated as a greeting.
+- **Edited messages are ignored** (the original was already answered; re-answering would send a second reply).
+- Duplicates (Telegram retries) are dropped by `chat.id:message_id`.
+- Replies are plain text (no `parse_mode`), split at 4096 characters. There is **no 24 h window**: agents can always
+  reply. Errors show in the inbox: bad/revoked token (401/404), user blocked the bot (403), flood control (429, one
+  short retry when Telegram asks to wait 3 s or less).
+
+**Troubleshooting.**
+- Nothing arrives: check `https://api.telegram.org/bot<token>/getWebhookInfo` in a browser **on your own computer**
+  (never paste the token in chats/tickets). `last_error_message` tells you why (certificate, 401 = secret mismatch:
+  press "Volver a registrar webhook").
+- "Telegram no aceptó ese token": copy it again from BotFather (it may have been revoked).

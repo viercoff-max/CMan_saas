@@ -11,6 +11,7 @@
 import type { Conversation } from "../types";
 import { getData } from "../data";
 import { FB_GRAPH, IG_GRAPH, isInstagramLoginToken } from "./graph";
+import { TELEGRAM_TEXT_LIMIT, telegramCall, type TelegramFailure } from "./telegram";
 
 const TIMEOUT_MS = 10_000;
 const HOUR = 60 * 60 * 1000;
@@ -109,9 +110,49 @@ async function post(url: string, token: string, body: unknown): Promise<{ ok: bo
   }
 }
 
+/** Telegram failure -> short, log-safe reason the inbox can map (token / network buckets in inbox/send-errors.ts). */
+export function describeTelegramError(error: TelegramFailure, status?: number, retryAfter?: number): string {
+  const http = status ? ` (http ${status})` : "";
+  switch (error) {
+    case "token": return `telegram_token_invalid${http}`;
+    case "blocked": return `telegram_bot_blocked_by_user${http}`;
+    case "chat_not_found": return `telegram_chat_not_found${http}`;
+    case "rate": return `rate_limited${retryAfter ? ` retry_after=${retryAfter}s` : ""}${http}`;
+    case "timeout": return "timeout";
+    case "network": return "network_error";
+    default: return `telegram_error${http}`;
+  }
+}
+
+/**
+ * Telegram: POST api.telegram.org/bot<token>/sendMessage {chat_id, text} with text <= 4096 chars, NO parse_mode (plain
+ * text, so model output can never inject formatting/links markup). No messaging window: a bot may answer a private chat
+ * at any time once the user has started it. One short retry when Telegram asks to wait <= 3 s (429 retry_after).
+ */
+async function sendTelegram(tenantId: string, conv: Conversation, text: string): Promise<{ ok: boolean; error?: string }> {
+  const parts = splitMessage(text, TELEGRAM_TEXT_LIMIT, "chars");
+  if (parts.length === 0) return { ok: false, error: "empty_message" };
+  const data = getData();
+  const account = await data.channels.get(tenantId, "telegram");
+  if (account.status !== "connected") return { ok: false, error: "channel_not_connected" };
+  const token = (await data.secrets.get<{ botToken?: string }>(tenantId, "channel", "telegram"))?.botToken;
+  if (!token) return { ok: false, error: "missing_token" };
+  for (const part of parts) {
+    let r = await telegramCall(token, "sendMessage", { chat_id: conv.externalId, text: part });
+    if (!r.ok && r.error === "rate" && r.retryAfter && r.retryAfter <= 3) {
+      const waitMs = r.retryAfter * 1000;
+      await new Promise((res) => setTimeout(res, waitMs));
+      r = await telegramCall(token, "sendMessage", { chat_id: conv.externalId, text: part });
+    }
+    if (!r.ok) return { ok: false, error: describeTelegramError(r.error, r.status, r.retryAfter) };
+  }
+  return { ok: true };
+}
+
 export async function sendToCustomer(tenantId: string, conv: Conversation, text: string): Promise<{ ok: boolean; error?: string }> {
   try {
     if (conv.channel === "simulator") return { ok: true };
+    if (conv.channel === "telegram") return await sendTelegram(tenantId, conv, text);
     const ch = conv.channel as MetaCh;
     const limit = TEXT_LIMITS[ch];
     if (!limit) return { ok: false, error: "unknown_channel" };

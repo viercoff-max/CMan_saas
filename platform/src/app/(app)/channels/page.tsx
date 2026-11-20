@@ -1,16 +1,35 @@
-import { getSession } from "@/lib/auth";
+import { getSession, hasRole } from "@/lib/auth";
 import { getData } from "@/lib/data";
-import { ChannelsClient, type AccountView } from "./ChannelsClient";
+import { maskTelegramToken, telegramWebhookReachable } from "@/lib/channels/telegram";
+import type { TelegramChannelSecrets } from "@/lib/channels/telegram-secret";
+import { ChannelsClient, type AccountView, type TelegramView } from "./ChannelsClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function ChannelsPage() {
   const s = await getSession();
   if (!s) return null; // layout already redirects
+  const data = getData();
   const accounts: AccountView[] = await Promise.all((["whatsapp", "instagram", "messenger"] as const).map(async (ch) => {
-    const a = await getData().channels.get(s.tenantId, ch);
+    const a = await data.channels.get(s.tenantId, ch);
     return { channel: ch, status: a.status, name: String(a.publicInfo.displayName ?? a.publicInfo.externalId ?? "") };
   }));
+
+  const tg = await data.channels.get(s.tenantId, "telegram");
+  const connected = tg.status === "connected";
+  // Only a masked hint of the token ever leaves the server ("7412••••••••Qx").
+  const token = connected ? (await data.secrets.get<TelegramChannelSecrets>(s.tenantId, "channel", "telegram"))?.botToken : undefined;
+  const w = String(tg.publicInfo.webhook ?? "");
+  const telegram: TelegramView = {
+    status: tg.status,
+    username: connected ? String(tg.publicInfo.username ?? "") : "",
+    connectedAt: connected ? String(tg.publicInfo.connectedAt ?? "") : "",
+    webhook: w === "ok" || w === "needs_https" ? w : "failed",
+    tokenHint: token ? maskTelegramToken(token) : "",
+    reachable: telegramWebhookReachable(process.env.PUBLIC_URL),
+    canEdit: hasRole(s.role, "admin"),
+  };
+
   const base = (process.env.PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");
-  return <ChannelsClient accounts={accounts} webhookUrl={`${base}/api/webhooks/meta`} verifyToken={process.env.META_VERIFY_TOKEN ?? ""} />;
+  return <ChannelsClient telegram={telegram} accounts={accounts} webhookUrl={`${base}/api/webhooks/meta`} verifyToken={process.env.META_VERIFY_TOKEN ?? ""} />;
 }

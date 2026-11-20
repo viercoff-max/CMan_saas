@@ -14,7 +14,8 @@ export async function withPreviews(tenantId: string, convs: Conversation[]): Pro
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 export function isWindowExpired(channel: Channel, lastInbound: string | null, now = Date.now()): boolean {
-  if (channel === "simulator") return false;
+  // Telegram has no customer-service window: a bot can always answer a private chat the user started.
+  if (channel === "simulator" || channel === "telegram") return false;
   if (!lastInbound) return true;
   return now - new Date(lastInbound).getTime() > WINDOW_MS;
 }
