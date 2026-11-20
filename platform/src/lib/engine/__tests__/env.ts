@@ -8,3 +8,5 @@ if (!process.env.ENGINE_TEST_DATA_DIR) {
 }
 process.env.DATA_DIR = process.env.ENGINE_TEST_DATA_DIR;
 delete process.env.OPENAI_API_KEY;
+delete process.env.ANTHROPIC_API_KEY;
+delete process.env.AI_PROVIDER;

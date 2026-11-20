@@ -9,6 +9,7 @@ vi.mock("../../channels/handoff", () => ({ notifyHandoff: async () => {} }));
 
 import { handleInbound, type EngineDeps, type EngineInboundEvent } from "../index";
 import type { LLMRequest } from "../llm";
+import { fakeMeter } from "./fake-meter";
 import { detectActionRequest, detectEscalation } from "../escalate";
 import { isLookupBlocked, MAX_FAILS_PER_ORDER, MAX_FAILS_PER_TENANT, MAX_INBOUND_PER_WINDOW, recordLookupFailure } from "../limiter";
 import { maskEmailsInText, redactForLLM } from "../text";
@@ -50,7 +51,7 @@ function makeDeps(over: Partial<EngineDeps> = {}) {
   const notify = vi.fn(async () => {});
   const deps: EngineDeps = {
     llm: async (req) => { llmCalls.push(req); return "La garantía es de 1 año contra defectos de fábrica."; },
-    now: () => MONDAY_OPEN, getOrdersConnector: () => null, notifyHandoff: notify, ...over,
+    now: () => MONDAY_OPEN, getOrdersConnector: () => null, notifyHandoff: notify, usage: fakeMeter(), ...over,
   };
   return { deps, llmCalls, notify };
 }

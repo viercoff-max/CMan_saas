@@ -8,6 +8,7 @@ vi.mock("../../channels/handoff", () => ({ notifyHandoff: async () => {} }));
 
 import { handleInbound, type EngineDeps } from "../index";
 import type { LLMRequest } from "../llm";
+import { fakeMeter } from "./fake-meter";
 import type { AgentSettings, OrderStatusResult, OrdersConnector } from "../../types";
 import { getData } from "../../data";
 
@@ -38,6 +39,7 @@ function makeDeps(over: Partial<EngineDeps> & { llmReply?: string } = {}) {
     now: () => MONDAY_OPEN,
     getOrdersConnector: () => null,
     notifyHandoff: notify,
+    usage: fakeMeter(),
     ...over,
   };
   return { deps, llmCalls, notify };

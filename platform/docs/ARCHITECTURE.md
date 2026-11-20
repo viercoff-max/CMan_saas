@@ -90,7 +90,7 @@ Add the Supabase implementation of `DataStore` (`src/lib/data/supabase`, `DATA_B
   "file", filePath})` stores `storage_path` and refuses (`DataValidationError("filePath")`) any path that does not start
   with THIS tenant's uuid + "/" (bytes: see "Storage" below).
   Real migration file names: `20261119235721_server_rpc_counters.sql`, `20261119235722_server_rpc_retention.sql` (applied);
-  `20261120090000_platform_tenant_overview.sql` (wave 1, written, NOT applied yet; test `supabase/tests/platform_tenant_overview.sql`).
+  `20261120002400_platform_tenant_overview.sql` (wave 1, written, NOT applied yet; test `supabase/tests/platform_tenant_overview.sql`).
 
 ### Wave 1 additions (2026-11-19) - the interface wave 2 uses
 All in `src/lib/data/types.ts`, implemented in both backends, covered by `data-store-contract.ts` (incl. cross-tenant
@@ -176,3 +176,32 @@ Wave 2 flow: `uploadLogo` -> `getData().brand.save(tenantId, {logoPath: r.path})
 (only `logo-<uuid>.<png|jpg|webp>`, nosniff, immutable cache); in Supabase mode the bucket's public URL is used.
 Tests: `src/lib/storage/__tests__/storage.test.ts` (one FileStore contract for both backends incl. cross-tenant negatives,
 bucket rules on the fake, logos, Supabase-mode outbox and the full upload -> index -> delete flow on the fake project).
+
+## AI provider (wave 2B: 2026-11-19)
+- `src/lib/engine/llm.ts`. Provider per call (`selectProvider`): **Anthropic** when `ANTHROPIC_API_KEY` is set (model
+  `ANTHROPIC_MODEL`, default `claude-haiku-4-5`); OpenAI (legacy) only when there is no Anthropic key, or
+  `AI_PROVIDER=openai` with `OPENAI_API_KEY`; otherwise the deterministic offline fallback (extractive answer or `[HANDOFF]`).
+  Plain `fetch` to `POST https://api.anthropic.com/v1/messages`, `anthropic-version: 2026-10-21` (the SDK is not a
+  dependency). Body: `{model, max_tokens: 400, system: [stable rules block with cache_control ephemeral, sources block],
+  messages: [{role: "user", content}]}`; no temperature (rejected on 2026-10-21); `thinking: disabled` only for Haiku 5.x.
+- Interface: `LLM = (req) => Promise<LLMResult | string>`, `LLMResult = {text, usage: {inputTokens, outputTokens,
+  cacheReadTokens?, cacheWriteTokens?}, model}` (a bare string, used by test fakes, means unknown usage).
+- Errors: 15 s overall deadline, ONE retry on 429 / 5xx / 529 overloaded / network error (honours `retry-after`, max 3 s);
+  4xx are not retried. Any failure -> offline fallback (not metered). `stop_reason: "refusal"` -> `[HANDOFF]`. Logs carry
+  status codes / error class only (never prompt, reply or key).
+- Prompt caching: `buildSystemPromptParts()` (prompt.ts) splits the system prompt into the per-tenant stable part (rules,
+  tone, dos/don'ts, escalation rules) and the per-question `<sources>`; the breakpoint sits on the stable part. NOTE: Haiku
+  4.5 only caches prefixes >= 4096 tokens, so with today's ~700-1,000-token rules nothing is cached yet (no error, no
+  extra cost); it starts paying off with long brand rules or on models with a 512-1024-token minimum (e.g. Haiku 5.5).
+- Guardrails unchanged and still in front of / behind the call: deterministic escalations, injection hardening, PII
+  redaction (`redactPII` / `redactForLLM`: emails, phones, order/tracking numbers never reach the provider), the
+  `[HANDOFF]` token and `validateReply` (promos, URLs, invented numbers, action claims, prompt leak).
+- Metering + cap (`src/lib/engine/usage.ts`, `EngineDeps.usage` injectable): before the call `usage.remaining(tenantId)`;
+  `<= 0` (or unreadable: fail closed) -> the paid LLM is NOT called, the offline fallback answers, and when it has no
+  answer the conversation goes to a person with `escalation_reason = "ai_cap_reached"` (meta `intent: "ai_cap_reached"`,
+  `aiCap: true`). One audit event per tenant per UTC day: action `ai.cap_reached`, actor `engine`, detail `day=YYYY-MM-DD`.
+  After every provider call: `usage.record(tenantId, {requests: 1, inputTokens: input + cache read + cache write,
+  outputTokens})`, best effort (a failure is logged, the reply still goes out). Simulator conversations are metered and
+  capped too (they call the same paid model).
+- Tests: `src/lib/engine/__tests__/anthropic-integration.test.ts` (fetch mocked: request shape, no PII in the body,
+  parsing incl. usage, retries/timeouts, provider selection, cap, per-tenant metering incl. cross-tenant negatives).

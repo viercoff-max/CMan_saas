@@ -8,9 +8,10 @@ import { getOrdersConnector as defaultGetOrdersConnector } from "../connectors/r
 import { notifyHandoff as defaultNotifyHandoff } from "../channels/handoff";
 import { detectActionRequest, detectEscalation, formatBusinessHours, isOpenNow, parseBusinessHours, type EscalationReason } from "./escalate";
 import { detectLanguage, type Lang } from "./lang";
-import { defaultLLM, type LLM } from "./llm";
+import { defaultLLM, normalizeLLMResult, offlineLLM, type LLM, type LLMRequest, type LLMResult } from "./llm";
 import { runOrderFlow, type LookupLimiter, type OrderState } from "./orders";
-import { buildSystemPrompt, buildUserMessage, HANDOFF_TOKEN } from "./prompt";
+import { buildSystemPromptParts, buildUserMessage, HANDOFF_TOKEN } from "./prompt";
+import { AI_CAP_REASON, dataUsageMeter, hasBudget, noteCapReached, recordUsage, type UsageMeter } from "./usage";
 import { isProductChunk, retrieve, type Retrieved } from "./retrieve";
 import * as T from "./templates";
 import * as C from "./copy";
@@ -37,6 +38,8 @@ export interface EngineDeps {
   now?: () => Date;
   getOrdersConnector?: (tenantId: string) => OrdersConnector | null | Promise<OrdersConnector | null>;
   notifyHandoff?: (tenantId: string, conversationId: string, reason: string) => Promise<void>;
+  /** Per-tenant AI metering + monthly cap (default: getData().usage / audit). */
+  usage?: UsageMeter;
 }
 
 /** Everything the engine remembers per conversation (conversation.state). Contains no PII except a transient email. */
@@ -70,6 +73,7 @@ export async function handleInbound(ev: EngineInboundEvent, deps: EngineDeps = {
     now: deps.now ?? (() => new Date()),
     getOrdersConnector: deps.getOrdersConnector ?? defaultGetOrdersConnector,
     notifyHandoff: deps.notifyHandoff ?? defaultNotifyHandoff,
+    usage: deps.usage ?? dataUsageMeter,
   };
   const tenantId = ev.tenantId;
   const text = String(ev.text ?? "").slice(0, MAX_INBOUND_CHARS);
@@ -246,7 +250,7 @@ async function knowledgeAnswer(ctx: Ctx, injection: boolean): Promise<EngineRepl
   // Always-on rules: file text when "Usar un archivo" is on (typed text if the file failed) + linked sources, capped.
   const sec = async (k: "dos_donts" | "escalation") => (await getEffectiveSectionContent(tenantId, k)).text;
   const sources = hits.map((h) => h.chunk);
-  const system = buildSystemPrompt({
+  const parts = buildSystemPromptParts({
     agentName: ctx.settings.agentName, tone: ctx.tone, lang: ctx.lang,
     dosDonts: await sec("dos_donts"), escalationRules: await sec("escalation"), chunks: sources,
   });
@@ -258,10 +262,30 @@ async function knowledgeAnswer(ctx: Ctx, injection: boolean): Promise<EngineRepl
     .map((m) => ({ role: (m.sender === "customer" ? "customer" : "assistant") as "customer" | "assistant", text: redactForLLM(m.body).slice(0, 400) }));
   const question = redactPII(text);
   const user = buildUserMessage(question, hist);
-  const raw = await ctx.deps.llm({ system, user, question, sources, lang: ctx.lang });
-  const meta = { sources: sources.map((c) => c.id), injection: injection || undefined };
+  const req: LLMRequest = {
+    system: `${parts.stable}\n${parts.sources}`, systemParts: { stable: parts.stable, dynamic: parts.sources },
+    user, question, sources, lang: ctx.lang,
+  };
+  // Monthly AI cap (per tenant, simulator included): with no budget left the paid LLM is NOT called; the free
+  // deterministic fallback answers, or the conversation goes to a person with reason "ai_cap_reached".
+  const budget = await hasBudget(ctx.deps.usage, tenantId, ctx.now);
+  let out: LLMResult;
+  if (budget.ok) {
+    out = normalizeLLMResult(await ctx.deps.llm(req));
+    await recordUsage(ctx.deps.usage, tenantId, out, ctx.now);
+  } else {
+    if (!budget.error) await noteCapReached(ctx.deps.usage, tenantId, ctx.now);
+    out = await offlineLLM(req);
+  }
+  const capped = !budget.ok;
+  const raw = out.text;
+  const meta = { sources: sources.map((c) => c.id), injection: injection || undefined, aiCap: capped || undefined };
 
-  if (!raw || raw.includes(HANDOFF_TOKEN)) return escalate(ctx, "no_answer", "no_answer", { intent: "llm_handoff", ...meta });
+  if (!raw || raw.includes(HANDOFF_TOKEN)) {
+    return capped
+      ? escalate(ctx, AI_CAP_REASON, "no_answer", { intent: "ai_cap_reached", ...meta })
+      : escalate(ctx, "no_answer", "no_answer", { intent: "llm_handoff", ...meta });
+  }
 
   const v = validateReply(raw, { sources: sources.map((c) => `${c.title}\n${c.text}`) });
   if (!v.ok) return escalate(ctx, "no_answer", "blocked", { intent: "blocked", blocked: v.violations, ...meta });
@@ -325,7 +349,7 @@ async function finish(ctx: Ctx, body: string, meta: Record<string, unknown>, opt
 }
 
 async function escalate(
-  ctx: Ctx, reason: EscalationReason, kind: T.HandoffKind, meta: Record<string, unknown>, opts: { intro?: string } = {},
+  ctx: Ctx, reason: EscalationReason | typeof AI_CAP_REASON, kind: T.HandoffKind, meta: Record<string, unknown>, opts: { intro?: string } = {},
 ): Promise<EngineReply> {
   const { state } = ctx;
   const bh = parseBusinessHours(ctx.settings.businessHours);

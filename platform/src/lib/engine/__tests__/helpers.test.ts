@@ -257,7 +257,7 @@ describe("prompt & offline LLM", () => {
   it("offline LLM answers extractively or hands off", async () => {
     const src = [chunk("1", "Garantía", "Todos los productos tienen garantía de 1 año. Los envíos tardan 5 días.")];
     const out = await offlineLLM({ system: "", user: "", question: "¿cuánto dura la garantía?", sources: src, lang: "es" });
-    expect(out).toBe("Todos los productos tienen garantía de 1 año.");
-    expect(await offlineLLM({ system: "", user: "", question: "x", sources: [], lang: "es" })).toBe("[HANDOFF]");
+    expect(out).toEqual({ text: "Todos los productos tienen garantía de 1 año.", usage: { inputTokens: 0, outputTokens: 0 }, model: "offline" });
+    expect((await offlineLLM({ system: "", user: "", question: "x", sources: [], lang: "es" })).text).toBe("[HANDOFF]");
   });
 });
