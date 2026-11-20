@@ -1,5 +1,6 @@
 // Pure math for "Plan y uso" and the dashboard "Uso de IA del mes" KPI (tested in __tests__/usage.test.ts).
 // Tokens = input + output of the UTC calendar month (same as usage.remaining in the data layer).
+import { isDemoConversation } from "../inbox/kinds";
 
 export interface UsageMeter {
   used: number;
@@ -37,11 +38,12 @@ export function monthStart(now: Date = new Date()): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
-/** Real-customer conversations (simulator excluded) with a message in the current UTC month. */
-export function countConversationsThisMonth(rows: { channel: string; lastMessageAt: string }[], now: Date = new Date()): number {
+/** Real-customer conversations (simulator and seeded demo conversations excluded) with a message in the current UTC month. */
+export function countConversationsThisMonth(rows: { channel: string; lastMessageAt: string; externalId?: string; state?: Record<string, unknown> }[], now: Date = new Date()): number {
   const start = monthStart(now).getTime(), end = renewalDate(now).getTime();
   return rows.filter((r) => {
     if (r.channel === "simulator") return false;
+    if (isDemoConversation({ externalId: r.externalId ?? "", state: r.state ?? {} })) return false; // P2-24
     const t = Date.parse(r.lastMessageAt);
     return Number.isFinite(t) && t >= start && t < end;
   }).length;

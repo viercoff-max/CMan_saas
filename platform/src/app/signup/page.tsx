@@ -1,9 +1,11 @@
 // "Crea tu cuenta" (Supabase mode). After submit the screen always says "revisa tu correo" (no account enumeration).
 // The confirmation link lands on /auth/confirm, which signs the user in and continues to `next` (default: the app,
 // which sends a user without a business to /onboarding).
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { clientIp } from "@/lib/security/client-ip";
 import { getLocale, makeT } from "@/lib/i18n";
 import { shellDict } from "@/lib/shell-dict";
 import { authBackend } from "@/lib/auth/backend";
@@ -11,6 +13,11 @@ import { AUTH_NEXT_COOKIE, baseCookieOptions } from "@/lib/auth/cookies";
 import { safeNext, withNext } from "@/lib/auth/redirect";
 import { Button, Field, inputCls } from "@/components/ui";
 import { AuthCard, Notice, linkCls } from "../login/AuthCard";
+import { NOINDEX } from "@/lib/platform/seo";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: makeT(shellDict, await getLocale())("signup.title"), robots: NOINDEX };
+}
 
 const ERRORS: Record<string, string> = { weak_password: "signup.errWeak", invalid: "signup.errInvalid", failed: "signup.errFailed" };
 
@@ -20,7 +27,7 @@ export default async function SignupPage({ searchParams }: { searchParams: Promi
     return (
       <AuthCard title={t("signup.title")}>
         <Notice>{t("signup.unavailable")}</Notice>
-        <p className="text-center text-sm"><Link href="/login" className={linkCls}>{t("signup.loginLink")}</Link></p>
+        <p className="text-center text-sm"><Link href="/login" className={`${linkCls} inline-flex min-h-11 items-center`}>{t("signup.loginLink")}</Link></p>
       </AuthCard>
     );
   }
@@ -38,6 +45,7 @@ export default async function SignupPage({ searchParams }: { searchParams: Promi
       await createSupabaseServerClient(),
       { email: form.get("email"), password: form.get("password"), name: form.get("name") },
       `${base}/auth/confirm?next=${encodeURIComponent(back)}`,
+      { ip: clientIp(await headers()) }, // M2: per-IP / per-e-mail limit; a limited sign-up still says "revisa tu correo"
     );
     if (!r.ok) redirect(withNext(`/signup?error=${r.error}`, back));
     // Backup for email templates that drop the redirect's query string (read once by /auth/confirm, same browser).

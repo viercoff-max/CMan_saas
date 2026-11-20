@@ -10,6 +10,7 @@ import { Badge, Card, LinkButton, Meter, PageHeader } from "@/components/ui";
 import { loadAiUsage } from "../billing/data";
 import { billingDict } from "../billing/dict";
 import { fmtDate } from "../billing/usage";
+import { loadInboxCounts } from "../inbox/counts";
 import { buildSteps, type StepState } from "./steps";
 
 const CHANNELS = ["telegram", "whatsapp", "instagram", "messenger"] as const;
@@ -50,8 +51,8 @@ export default async function Dashboard() {
   const t = makeT(shellDict, locale);
   const tb = makeT(billingDict, locale);
   const isAdmin = hasRole(s.role, "admin");
-  const [counts, usage, admin] = await Promise.all([
-    getData().conversations.countByStatus(s.tenantId),
+  const [{ counts, urgent }, usage, admin] = await Promise.all([
+    loadInboxCounts(s.tenantId), // same loader as the inbox banner and the sidebar badge (P2-1)
     loadAiUsage(s.tenantId),
     isAdmin ? adminState(s.tenantId) : Promise.resolve(NO_ADMIN),
   ]);
@@ -66,13 +67,19 @@ export default async function Dashboard() {
       <PageHeader title={firstName ? t("dash.hello", { name: firstName }) : t("dash.title")} subtitle={isAdmin ? t("dash.subtitle") : t("dash.agentSubtitle")} />
       {isAdmin && nextIdx === -1 && <p className="mb-4 rounded-xl bg-green-100 px-4 py-3 text-sm text-green-900" role="status">{t("dash.allDone")}</p>}
       {admin.shopDemo && <p className="mb-4 rounded-xl bg-amber-100 px-4 py-3 text-sm text-amber-900" role="status">{t("dash.demo")}</p>}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {[["dash.stats.human", counts.needs_human + counts.human], ["dash.stats.bot", counts.bot], ["dash.stats.resolved", counts.resolved]].map(([k, v]) => (
-          <Card key={k as string}><div className="text-3xl font-semibold">{v}</div><div className="text-sm text-muted">{t(k as string)}</div></Card>
+      {/* 2x2 on phones so the checklist stays near the top (P2-3). */}
+      <div className="mb-6 grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+        <Card className={`p-4 ${urgent > 0 ? "border-l-4 border-l-red-600" : ""}`}>
+          <div className="text-2xl font-semibold md:text-3xl">{counts.needs_human}</div>
+          <div className="text-sm text-muted">{t("dash.stats.waiting")}</div>
+          {urgent > 0 && <div className="mt-1 text-sm font-semibold text-red-700 dark:text-red-300"><span aria-hidden>⚠ </span>{t("dash.stats.urgent", { n: urgent })}</div>}
+        </Card>
+        {([["dash.stats.botNow", counts.bot], ["dash.stats.resolved", counts.resolved]] as const).map(([k, v]) => (
+          <Card key={k} className="p-4"><div className="text-2xl font-semibold md:text-3xl">{v}</div><div className="text-sm text-muted">{t(k)}</div></Card>
         ))}
-        <Card>
+        <Card className="p-4">
           <div className="text-xs font-semibold uppercase tracking-wide text-muted">{tb("kpi.ai")}</div>
-          <div className="mt-1 text-3xl font-semibold">{ai.noCap ? "—" : `${ai.percent}%`}</div>
+          <div className="mt-1 text-2xl font-semibold md:text-3xl">{ai.noCap ? "—" : `${ai.percent}%`}</div>
           <div className="my-2"><Meter percent={ai.percent} label={tb("kpi.ai")} valueText={ai.noCap ? tb("kpi.aiNone") : `${ai.percent}%`} tone={ai.overCap || ai.noCap ? "bad" : "brand"} /></div>
           <div className="text-sm text-muted">{ai.noCap ? tb("kpi.aiNone") : tb("kpi.aiHint", { date: fmtDate(usage.renewsAt, locale, { day: "numeric", month: "short" }) })}</div>
         </Card>

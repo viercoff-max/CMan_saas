@@ -40,8 +40,8 @@ export default async function LandingPage() {
           <div className="mt-10">
             <h2 className="text-sm font-semibold text-white">{c.channelsTitle}</h2>
             <ul className="mt-3 flex flex-wrap gap-2">
-              {c.channels.map((ch, i) => (
-                <li key={ch.name} className={`rounded-full px-3 py-1 text-sm ${i === 0 ? "bg-white font-semibold text-ink" : "border border-white/30 text-white/85"}`}>
+              {c.channels.map((ch) => (
+                <li key={ch.name} className={`rounded-full px-3 py-1 text-sm ${ch.available ? "bg-white font-semibold text-ink" : "border border-white/30 text-white/85"}`}>
                   {ch.name} · {ch.state}
                 </li>
               ))}

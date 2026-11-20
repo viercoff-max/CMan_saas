@@ -8,11 +8,13 @@ import { inboxDict } from "./dict";
 import { PlatformIcon, StatusBadge, relTime } from "./ui";
 import { Simulator } from "./Simulator";
 import { classifySendError } from "./send-errors";
+import { isDemoConversation, isKnownReason, isUrgent, sortForInbox } from "./kinds";
 
-type Item = Conversation & { preview: string; previewSender: string };
-type Thread = { conversation: Conversation; messages: Message[]; windowExpired: boolean };
+type Item = Conversation & { preview: string; previewSender: string; urgent?: boolean; demo?: boolean };
+type Thread = { conversation: Conversation; messages: Message[]; windowExpired: boolean; demo?: boolean };
 const POLL_MS = 4000;
-const PLATFORMS: Channel[] = ["whatsapp", "instagram", "messenger", "simulator"];
+// Telegram is the only live channel in the MVP (src/lib/platform/channels.ts); the Meta channels are "coming soon".
+const PLATFORMS: Channel[] = ["telegram", "simulator"];
 const STATUS_TABS: ConversationStatus[] = ["needs_human", "bot", "human", "resolved"];
 const ON_BRAND = "text-[var(--on-brand,#fff)]";
 
@@ -21,6 +23,7 @@ export function InboxClient({ initialId, initialSimulator }: { initialId: string
   const [items, setItems] = useState<Item[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [urgentCount, setUrgentCount] = useState(0);
   const [platform, setPlatform] = useState<Channel | "">("");
   const [status, setStatus] = useState<ConversationStatus | "">("");
   const [q, setQ] = useState("");
@@ -42,7 +45,7 @@ export function InboxClient({ initialId, initialSimulator }: { initialId: string
       const r = await fetch(`/api/inbox/conversations?${p}`, { cache: "no-store" });
       if (!r.ok) return;
       const d = await r.json();
-      setItems(d.conversations); setCounts(d.counts); setLoaded(true);
+      setItems(d.conversations); setCounts(d.counts); setUrgentCount(Number(d.urgent) || 0); setLoaded(true);
     } catch { /* offline: keep last data */ }
   }, []);
 
@@ -82,26 +85,30 @@ export function InboxClient({ initialId, initialSimulator }: { initialId: string
   const refresh = () => { void loadList(); void loadThread(selected); };
   const filtered = !!(platform || status || q.trim());
 
-  const sorted = [...items].sort((a, b) => {
-    const pa = a.status === "needs_human" ? 0 : 1, pb = b.status === "needs_human" ? 0 : 1;
-    return pa - pb || b.lastMessageAt.localeCompare(a.lastMessageAt);
-  });
+  // Urgent (safety / legal) first, then the rest of "needs a person", then everything else.
+  const sorted = sortForInbox(items);
   const rightOpen = showSim || !!selected;
   const threadReady = thread && thread.conversation.id === selected;
 
   return (
     <div>
+      {/* On phones an open conversation / the simulator replaces the header, banner and filters (composer in view). */}
+      <div className={rightOpen ? "hidden md:block" : ""}>
       <PageHeader title={t("title")} subtitle={t("subtitle")}
         action={<Button variant="secondary" className="min-h-[44px]" onClick={() => { setSelected(null); setShowSim(true); }}>{t("try")}</Button>} />
 
       {waiting > 0 && (
         <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-red-400 bg-red-50 px-4 py-3 text-red-900 dark:bg-red-950/40 dark:text-red-100">
-          <span className="text-base font-semibold">{waiting === 1 ? t("waiting.one") : t("waiting.many", { n: waiting })}</span>
+          <span className="text-base font-semibold">
+            {waiting === 1 ? t("waiting.one") : t("waiting.many", { n: waiting })}
+            {urgentCount > 0 && <> · <span className="inline-flex items-center gap-1 rounded-full bg-red-700 px-2 py-0.5 text-sm text-white"><span aria-hidden>⚠</span>{urgentCount === 1 ? t("waiting.urgent", { n: 1 }) : t("waiting.urgentMany", { n: urgentCount })}</span></>}
+          </span>
           {status !== "needs_human" && (
             <Button variant="secondary" className="min-h-[44px]" onClick={() => { setStatus("needs_human"); setPlatform(""); setShowSim(false); setSelected(null); }}>{t("waiting.see")}</Button>
           )}
         </div>
       )}
+      </div>
 
       <div className="grid gap-4 md:grid-cols-[340px_1fr]">
         {/* LIST */}
@@ -145,12 +152,13 @@ export function InboxClient({ initialId, initialSimulator }: { initialId: string
               </li>
             )}
             {sorted.map((c) => {
-              const urgent = c.status === "needs_human";
+              const waitingRow = c.status === "needs_human";
+              const urgent = !!c.urgent;
               const unread = c.unread > 0;
               return (
                 <li key={c.id}>
                   <button onClick={() => open(c.id)} aria-current={selected === c.id && !showSim ? "true" : undefined}
-                    className={`flex min-h-[64px] w-full items-start gap-3 rounded-2xl border p-3 text-left transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${selected === c.id && !showSim ? "border-brand bg-canvas" : urgent ? "border-red-300 bg-red-50 dark:bg-red-950/30" : "border-line bg-surface"}`}>
+                    className={`flex min-h-[64px] w-full items-start gap-3 rounded-2xl border p-3 text-left transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${selected === c.id && !showSim ? "border-brand bg-canvas" : urgent ? "border-l-4 border-red-600 bg-red-50 dark:bg-red-950/40" : waitingRow ? "border-red-300 bg-red-50 dark:bg-red-950/30" : "border-line bg-surface"}`}>
                     <PlatformIcon channel={c.channel} name={t(`p.${c.channel}`)} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center justify-between gap-2">
@@ -161,7 +169,8 @@ export function InboxClient({ initialId, initialSimulator }: { initialId: string
                         {c.previewSender === "agent" ? t("you") : c.previewSender === "bot" ? t("bot") : ""}{c.preview}
                       </span>
                       <span className="mt-1.5 flex items-center gap-2">
-                        <StatusBadge status={c.status} label={t(`b.${c.status}`)} />
+                        {urgent ? <UrgentPill reason={c.escalationReason} /> : <StatusBadge status={c.status} label={t(`b.${c.status}`)} />}
+                        {c.demo && <span className="text-xs text-muted">{t("demo.tag")}</span>}
                         {unread && (
                           <span className="inline-flex items-center gap-1 text-xs font-medium text-ink">
                             <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-brand" />
@@ -210,12 +219,25 @@ function Chip({ active, onClick, children, alert }: { active: boolean; onClick: 
   return <button type="button" aria-pressed={active} onClick={onClick} className={`${base} ${cls}`}>{children}</button>;
 }
 
+/** Red "Urgente · seguridad / legal" pill with an icon (REVIEW-qa-2 P1-6). */
+function UrgentPill({ reason }: { reason: string | null }) {
+  const t = useT(inboxDict);
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-red-700 px-2.5 py-0.5 text-xs font-semibold text-white">
+      <span aria-hidden>⚠</span>{t(reason === "legal" ? "urgent.legal" : "urgent.safety")}
+    </span>
+  );
+}
+
 function ThreadView({ thread, onBack, onChanged }: { thread: Thread; onBack: () => void; onChanged: () => void }) {
   const t = useT(inboxDict);
   const { conversation: c, messages, windowExpired } = thread;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const demo = isDemoConversation(c);
+  const urgent = isUrgent(c);
   const endRef = useRef<HTMLDivElement>(null);
   const lastId = messages[messages.length - 1]?.id;
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [lastId, c.id]);
@@ -228,10 +250,14 @@ function ThreadView({ thread, onBack, onChanged }: { thread: Thread; onBack: () 
   // One step: sending the first reply takes the conversation over (done by the server).
   async function send() {
     if (!text.trim() || busy) return;
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setNotice("");
     try {
       const r = await fetch(`/api/inbox/conversations/${c.id}/reply`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
-      if (r.ok) setText("");
+      if (r.ok) {
+        setText("");
+        const d = await r.json().catch(() => ({}));
+        if (d?.demo) setNotice(t("demo.saved"));
+      }
       else {
         const d = await r.json().catch(() => ({}));
         if (d?.detail) console.warn("[inbox] send failed:", String(d.detail).slice(0, 200));
@@ -241,16 +267,17 @@ function ThreadView({ thread, onBack, onChanged }: { thread: Thread; onBack: () 
     finally { setBusy(false); onChanged(); }
   }
 
-  const reason = c.escalationReason ? t(`r.${c.escalationReason}`) : "";
+  const reason = isKnownReason(c.escalationReason) ? t(`r.${c.escalationReason}`) : "";
   return (
-    <Card className="flex flex-col p-0">
+    <Card className={`flex flex-col p-0 ${urgent ? "border-l-4 border-l-red-600" : ""}`}>
       <div className="flex items-center gap-3 border-b border-line p-4">
         <button className="-ml-2 inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl px-2 text-sm text-muted hover:text-ink md:hidden" onClick={onBack} aria-label={t("back")}>←</button>
         <PlatformIcon channel={c.channel} name={t(`p.${c.channel}`)} />
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold">{c.customerName || t("noName")}</div>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted">
-            <StatusBadge status={c.status} label={t(`b.${c.status}`)} />
+            {urgent ? <UrgentPill reason={c.escalationReason} /> : <StatusBadge status={c.status} label={t(`b.${c.status}`)} />}
+            {demo && <span className="rounded-full border border-line px-2 py-0.5">{t("demo.tag")}</span>}
             {c.status === "needs_human" && reason && <span>{t("reason", { reason })}</span>}
             {c.status === "needs_human" && <span className="font-medium text-red-700 dark:text-red-300">{t("waitingSince", { time: relTime(c.lastMessageAt, t) })}</span>}
           </div>
@@ -263,7 +290,7 @@ function ThreadView({ thread, onBack, onChanged }: { thread: Thread; onBack: () 
         </div>
       )}
 
-      <div role="log" aria-live="polite" aria-label={t("thread")} tabIndex={0} className="max-h-[55vh] min-h-[280px] space-y-2 overflow-y-auto p-4">
+      <div role="log" aria-live="polite" aria-label={t("thread")} tabIndex={0} className="max-h-[50vh] min-h-[220px] space-y-2 overflow-y-auto p-4 md:max-h-[55vh] md:min-h-[280px]">
         {messages.map((m) => (
           <div key={m.id} className={`flex ${m.sender === "customer" ? "justify-start" : "justify-end"}`}>
             <div className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-sm ${
@@ -276,11 +303,14 @@ function ThreadView({ thread, onBack, onChanged }: { thread: Thread; onBack: () 
         <div ref={endRef} />
       </div>
 
-      <div className="space-y-3 border-t border-line p-4">
+      {/* Sticky composer: always reachable without scrolling, also on phones (REVIEW-qa-2 P1-3). */}
+      <div className="sticky bottom-0 z-10 space-y-3 rounded-b-2xl border-t border-line bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        {demo && <p role="note" className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">{t("demo.note")}</p>}
+        {notice && <p role="status" className="text-sm text-ok">{notice}</p>}
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         <label className="block">
           <span className="sr-only">{t("replyLabel")}</span>
-          <textarea className={`${inputCls} text-base md:text-sm`} rows={3} value={text} placeholder={t("placeholder")} onChange={(e) => setText(e.target.value)}
+          <textarea className={`${inputCls} text-base md:text-sm`} rows={2} value={text} placeholder={t("placeholder")} onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }
             }} />

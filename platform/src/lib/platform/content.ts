@@ -1,20 +1,57 @@
 // Copy for the public pages (Spanish default + English). Honest copy only: no invented numbers, testimonials,
-// customer logos or prices. "{brand}" is replaced with PLATFORM_BRAND.name, "{contact}" with the privacy contact
-// (or "por definir"), "{entity}" with the legal entity (or "por definir").
+// customer logos or prices. Tokens, all driven by lib/platform/brand.ts:
+//   {brand} = PLATFORM_BRAND.name, {entity} = legalEntityName, {contact} = privacyContactEmail, {address} = legalAddress.
+// A legal field that is still null renders as a clearly marked owner-fillable field "[Completar: razón social]"
+// (never a plausible-looking gap like "(razón social por definir)"), see fillParts / LegalDocView.
 import type { Locale } from "../i18n-shared";
-import { PLATFORM_BRAND } from "./brand";
+import { LEGAL_FIELD_LABEL, PLATFORM_BRAND, type LegalField } from "./brand";
+import { channelChips } from "./channels";
 
 export interface LegalSection { h: string; p: string[] }
 export interface LegalDoc { title: string; description: string; intro: string; sections: LegalSection[] }
 
-const TBD = { es: "por definir", en: "to be defined" } satisfies Record<Locale, string>;
+const TOKENS: Record<string, LegalField> = { "{entity}": "legalEntityName", "{contact}": "privacyContactEmail", "{address}": "legalAddress" };
+const TOKEN_RE = /(\{brand\}|\{entity\}|\{contact\}|\{address\})/;
 
-export function fill(s: string, locale: Locale): string {
-  return s
-    .replaceAll("{brand}", PLATFORM_BRAND.name)
-    .replaceAll("{contact}", PLATFORM_BRAND.privacyContactEmail ?? `(${locale === "en" ? "contact e-mail" : "correo de contacto"} ${TBD[locale]})`)
-    .replaceAll("{entity}", PLATFORM_BRAND.legalEntityName ?? `(${locale === "en" ? "legal entity" : "razón social"} ${TBD[locale]})`);
+export type LegalPart =
+  | { kind: "text"; text: string }
+  | { kind: "email"; email: string }
+  | { kind: "missing"; field: LegalField; label: string };
+
+/** "[Completar: razón social]" / "[Fill in: legal entity name]". */
+export function missingMarker(field: LegalField, locale: Locale): string {
+  return `[${locale === "en" ? "Fill in" : "Completar"}: ${LEGAL_FIELD_LABEL[field][locale]}]`;
 }
+
+/** Splits a template into renderable parts (text / mailto e-mail / missing owner-fillable field). */
+export function fillParts(s: string, locale: Locale, b: { [K in LegalField]: string | null } = PLATFORM_BRAND): LegalPart[] {
+  const out: LegalPart[] = [];
+  for (const piece of s.split(TOKEN_RE)) {
+    if (!piece) continue;
+    if (piece === "{brand}") { out.push({ kind: "text", text: PLATFORM_BRAND.name }); continue; }
+    const field = TOKENS[piece];
+    if (!field) { out.push({ kind: "text", text: piece }); continue; }
+    const v = b[field]?.trim();
+    if (!v) out.push({ kind: "missing", field, label: missingMarker(field, locale) });
+    else out.push(field === "privacyContactEmail" ? { kind: "email", email: v } : { kind: "text", text: v });
+  }
+  return out;
+}
+
+/** Plain-text version (metadata, tests). Missing fields become "[Completar: …]". */
+export function fill(s: string, locale: Locale, b?: { [K in LegalField]: string | null }): string {
+  return fillParts(s, locale, b).map((p) => (p.kind === "text" ? p.text : p.kind === "email" ? p.email : p.label)).join("");
+}
+
+export const completeNotice = {
+  es: { title: "Completar antes de publicar", body: "Faltan datos del responsable. Complétalos en src/lib/platform/brand.ts antes de dar estas direcciones a Meta o publicarlas:" },
+  en: { title: "Complete before publishing", body: "Some controller details are missing. Fill them in src/lib/platform/brand.ts before giving these URLs to Meta or publishing them:" },
+} satisfies Record<Locale, { title: string; body: string }>;
+
+export const deletionRequest = {
+  es: { title: "Pedir la eliminación por correo", button: "Escribir para pedir la eliminación", subject: "Solicitud de eliminación de datos", missing: "El correo para recibir solicitudes todavía no está configurado." },
+  en: { title: "Ask for deletion by e-mail", button: "Write to ask for deletion", subject: "Data deletion request", missing: "The e-mail for receiving requests is not configured yet." },
+} satisfies Record<Locale, { title: string; button: string; subject: string; missing: string }>;
 
 export const draftBanner = {
   es: { title: "Borrador: debe revisarlo un abogado antes de publicarse.", body: "Este texto es un punto de partida y todavía no es un documento legal vigente." },
@@ -32,12 +69,7 @@ export const landing = {
     ctaPrimary: "Crear cuenta",
     ctaSecondary: "Entrar",
     channelsTitle: "Canales",
-    channels: [
-      { name: "Telegram", state: "Disponible" },
-      { name: "WhatsApp", state: "Próximamente" },
-      { name: "Instagram", state: "Próximamente" },
-      { name: "Messenger", state: "Próximamente" },
-    ],
+    channels: channelChips("es"), // single source: lib/platform/channels.ts
     featuresTitle: "Qué hace",
     features: [
       { h: "Contesta solo con tu información", p: "Responde a partir de lo que tú escribes o subes (productos, envíos, garantía, preguntas frecuentes). Si no lo sabe, no lo inventa: lo pasa a tu equipo." },
@@ -65,12 +97,7 @@ export const landing = {
     ctaPrimary: "Create account",
     ctaSecondary: "Sign in",
     channelsTitle: "Channels",
-    channels: [
-      { name: "Telegram", state: "Available" },
-      { name: "WhatsApp", state: "Coming soon" },
-      { name: "Instagram", state: "Coming soon" },
-      { name: "Messenger", state: "Coming soon" },
-    ],
+    channels: channelChips("en"),
     featuresTitle: "What it does",
     features: [
       { h: "Answers only from your information", p: "It answers from what you write or upload (products, shipping, warranty, FAQ). If it does not know, it does not make it up: it passes the chat to your team." },
@@ -130,7 +157,7 @@ export const privacy: Record<Locale, LegalDoc> = {
     description: "Borrador del aviso de privacidad de {brand} (México, LFPDPPP).",
     intro: "Este aviso explica qué datos personales trata {brand}, para qué, con quién se comparten y cómo ejercer tus derechos, conforme a la Ley Federal de Protección de Datos Personales en Posesión de los Particulares (LFPDPPP) y su normativa.",
     sections: [
-      { h: "1. Responsable", p: ["{entity} es responsable de los datos de las cuentas de la plataforma (los negocios y sus equipos). Contacto de privacidad: {contact}."] },
+      { h: "1. Responsable", p: ["{entity} es responsable de los datos de las cuentas de la plataforma (los negocios y sus equipos). Domicilio: {address}. Contacto de privacidad: {contact}."] },
       { h: "2. Dos tipos de datos y dos papeles", p: [
         "Datos de cuenta: nombre, correo, contraseña (guardada solo como hash), rol y negocio de las personas que usan el panel. Aquí {brand} es el responsable.",
         "Datos de los clientes finales de cada negocio: nombre o usuario en el canal, identificador del chat, mensajes y, si el negocio lo activa, número de pedido y correo para consultar su estado. Aquí el responsable es cada negocio y {brand} actúa como encargado: trata esos datos solo para prestar el servicio al negocio y siguiendo sus instrucciones.",
@@ -167,7 +194,7 @@ export const privacy: Record<Locale, LegalDoc> = {
     description: "Draft privacy notice for {brand} (Mexico, LFPDPPP).",
     intro: "This notice explains which personal data {brand} processes, why, who it is shared with and how to exercise your rights, under Mexico's Federal Law on the Protection of Personal Data Held by Private Parties (LFPDPPP) and its regulations.",
     sections: [
-      { h: "1. Controller", p: ["{entity} is the controller of the platform's account data (businesses and their teams). Privacy contact: {contact}."] },
+      { h: "1. Controller", p: ["{entity} is the controller of the platform's account data (businesses and their teams). Address: {address}. Privacy contact: {contact}."] },
       { h: "2. Two kinds of data and two roles", p: [
         "Account data: name, e-mail, password (stored only as a hash), role and business of the people who use the panel. Here {brand} is the controller.",
         "Data of each business's end customers: name or username on the channel, chat identifier, messages and, if the business enables it, an order number and e-mail to look up its status. Here each business is the controller and {brand} acts as processor: it handles that data only to provide the service to the business and following its instructions.",
@@ -208,7 +235,7 @@ export const terms: Record<Locale, LegalDoc> = {
     description: "Borrador de los términos de uso de {brand}.",
     intro: "Estos términos regulan el uso de {brand} por los negocios que crean una cuenta y por sus equipos. Al crear una cuenta los aceptas.",
     sections: [
-      { h: "1. El servicio", p: ["{brand} es un asistente que contesta a los clientes de un negocio en canales de mensajería (hoy Telegram; WhatsApp, Instagram y Messenger más adelante) usando la información que el negocio le da, y un panel para que el equipo atienda las conversaciones."] },
+      { h: "1. El servicio", p: ["{brand}, operado por {entity}, es un asistente que contesta a los clientes de un negocio en canales de mensajería (hoy Telegram; WhatsApp, Instagram y Messenger más adelante) usando la información que el negocio le da, y un panel para que el equipo atienda las conversaciones."] },
       { h: "2. Cuentas", p: ["Debes dar datos verdaderos, cuidar tu contraseña y avisarnos de cualquier acceso no autorizado. El dueño del negocio decide quién entra a su equipo y con qué rol."] },
       { h: "3. Responsabilidades del negocio", p: [
         "Eres responsable de la información que cargas, de lo que tu equipo responde y de cumplir las leyes que te aplican (protección de datos, consumidor, publicidad) frente a tus clientes, incluido darles tu propio aviso de privacidad.",
@@ -228,7 +255,7 @@ export const terms: Record<Locale, LegalDoc> = {
     description: "Draft terms of use for {brand}.",
     intro: "These terms govern the use of {brand} by the businesses that create an account and by their teams. By creating an account you accept them.",
     sections: [
-      { h: "1. The service", p: ["{brand} is an assistant that answers a business's customers on messaging channels (Telegram today; WhatsApp, Instagram and Messenger later) using the information the business gives it, plus a panel for the team to handle conversations."] },
+      { h: "1. The service", p: ["{brand}, operated by {entity}, is an assistant that answers a business's customers on messaging channels (Telegram today; WhatsApp, Instagram and Messenger later) using the information the business gives it, plus a panel for the team to handle conversations."] },
       { h: "2. Accounts", p: ["You must give true information, keep your password safe and tell us about any unauthorised access. The business owner decides who joins the team and with which role."] },
       { h: "3. The business's responsibilities", p: [
         "You are responsible for the information you upload, for what your team replies and for complying with the laws that apply to you (data protection, consumer, advertising) towards your customers, including giving them your own privacy notice.",
@@ -252,8 +279,8 @@ export const deletion: Record<Locale, LegalDoc> = {
     description: "Cómo pedir que se borren los datos de tus conversaciones con un negocio que usa {brand}.",
     intro: "Si escribiste a un negocio que usa {brand} (por Telegram, WhatsApp, Instagram o Messenger), puedes pedir que se borren tus conversaciones y los datos ligados a ellas.",
     sections: [
-      { h: "1. Pídelo al negocio", p: ["El negocio con el que hablaste es el responsable de tus datos. Escríbele por el mismo chat o por su contacto y pide que eliminen tus datos. Su equipo puede pedirnos el borrado y nosotros lo hacemos."] },
-      { h: "2. O escríbenos", p: ["Escribe a {contact} con: el nombre del negocio, el canal (Telegram, WhatsApp, Instagram o Messenger) y tu usuario o número en ese canal. No mandes contraseñas ni datos de pago. Podemos pedirte confirmar que la cuenta es tuya antes de borrar."] },
+      { h: "1. Escríbenos directamente", p: ["Puedes pedirnos el borrado sin pasar por el negocio: escribe a {contact} (abajo hay un botón que prepara el correo). También puedes pedírselo al negocio con el que hablaste, que es el responsable de tus datos; su equipo nos pide el borrado y nosotros lo hacemos."] },
+      { h: "2. Qué incluir en tu correo", p: ["Escribe a {contact} con: el nombre del negocio, el canal (Telegram, WhatsApp, Instagram o Messenger) y tu usuario o número en ese canal. No mandes contraseñas ni datos de pago. Podemos pedirte confirmar que la cuenta es tuya antes de borrar."] },
       { h: "3. Desde Facebook o Instagram", p: [
         "Si quitas el acceso de la app en la configuración de tu cuenta de Facebook (Apps y sitios web), Meta nos envía una solicitud de eliminación firmada. La verificamos, borramos las conversaciones que podamos ligar a esa cuenta y Meta te muestra un código de confirmación.",
         "Con ese código puedes consultar el estado en /api/webhooks/meta/data-deletion?code=TU_CODIGO. Si no podemos ligar la solicitud a tus conversaciones (Meta usa identificadores distintos según el producto), la revisa una persona.",
@@ -270,8 +297,8 @@ export const deletion: Record<Locale, LegalDoc> = {
     description: "How to ask for the data of your conversations with a business that uses {brand} to be deleted.",
     intro: "If you wrote to a business that uses {brand} (on Telegram, WhatsApp, Instagram or Messenger), you can ask for your conversations and the data linked to them to be deleted.",
     sections: [
-      { h: "1. Ask the business", p: ["The business you talked to is the controller of your data. Write to it in the same chat or through its contact details and ask for your data to be deleted. Its team can ask us to delete it and we do."] },
-      { h: "2. Or write to us", p: ["Write to {contact} with: the business name, the channel (Telegram, WhatsApp, Instagram or Messenger) and your username or number on that channel. Do not send passwords or payment details. We may ask you to confirm the account is yours before deleting."] },
+      { h: "1. Write to us directly", p: ["You can ask us for the deletion without going through the business: write to {contact} (the button below prepares the e-mail). You can also ask the business you talked to, which is the controller of your data; its team asks us and we delete it."] },
+      { h: "2. What to include in your e-mail", p: ["Write to {contact} with: the business name, the channel (Telegram, WhatsApp, Instagram or Messenger) and your username or number on that channel. Do not send passwords or payment details. We may ask you to confirm the account is yours before deleting."] },
       { h: "3. From Facebook or Instagram", p: [
         "If you remove the app's access in your Facebook account settings (Apps and websites), Meta sends us a signed deletion request. We verify it, delete the conversations we can link to that account, and Meta shows you a confirmation code.",
         "With that code you can check the status at /api/webhooks/meta/data-deletion?code=YOUR_CODE. If we cannot link the request to your conversations (Meta uses different identifiers per product), a person reviews it.",

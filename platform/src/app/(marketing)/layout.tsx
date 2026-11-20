@@ -8,7 +8,7 @@ import { platformDict } from "@/lib/platform/dict";
 import { PlatformWordmark, platformThemeStyle } from "@/lib/platform/ui";
 
 const navLink = "inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-ink hover:bg-canvas";
-const footLink = "text-sm text-muted underline-offset-2 hover:text-ink hover:underline";
+const footLink = "inline-flex min-h-11 items-center text-sm text-muted underline-offset-2 hover:text-ink hover:underline";
 
 export default async function MarketingLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale();

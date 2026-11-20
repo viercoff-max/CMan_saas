@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Card, ConfirmDialog, Field, inputCls } from "@/components/ui";
 import { useLocale, useT } from "@/lib/i18n-client";
+import * as T from "@/lib/engine/templates";
 import { dict } from "./dict";
 
 interface Props {
@@ -12,6 +13,9 @@ interface Props {
   oauth: boolean;
   channelsConnected: boolean;
   notice: { text: string; ok: boolean } | null;
+  /** The tenant's saved tone and default language, so the test preview is the exact text the bot sends. */
+  tone: number;
+  lang: "es" | "en";
 }
 interface OrderResult { found: boolean; statusText?: string; trackingUrl?: string; trackingNumber?: string; carrier?: string; estimatedDelivery?: string; tooOld?: boolean; mayBeOutsideWindow?: boolean; error?: string }
 
@@ -29,7 +33,7 @@ function clientShop(v: string): string | null {
   return SHOP_RE.test(s) ? s : null;
 }
 
-export function AddonsClient({ connected, connectedAt, info, oauth, channelsConnected, notice }: Props) {
+export function AddonsClient({ connected, connectedAt, info, oauth, channelsConnected, notice, tone, lang }: Props) {
   const t = useT(dict);
   const locale = useLocale();
   const router = useRouter();
@@ -43,6 +47,14 @@ export function AddonsClient({ connected, connectedAt, info, oauth, channelsConn
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  // Demo store: one coherent state (P1-5): "Tienda de demostración activa", primary "Conectar mi tienda real",
+  // secondary "Quitar demostración". A real connection replaces the demo store.
+  const demoMode = connected && info.mock;
+  async function removeDemo() {
+    setBusy(true);
+    await post("/api/shopify/disconnect");
+    setBusy(false); router.refresh();
+  }
   const errMsg = (d: Record<string, unknown>) => t(`err.${String(d.error)}` in dict.es ? `err.${String(d.error)}` : "err.generic");
   const manualReady = method === "cc" ? !!(clientId && clientSecret) : !!token;
 
@@ -76,15 +88,23 @@ export function AddonsClient({ connected, connectedAt, info, oauth, channelsConn
             <p className="mt-1 text-sm text-muted">{t("shopify.desc")}</p>
           </div>
           <div className="flex gap-2">
-            {connected && info.mock && <Badge tone="info">{t("status.demo")}</Badge>}
-            <Badge tone={connected ? "good" : "neutral"}>{connected ? t("status.connected") : t("status.disconnected")}</Badge>
+            {demoMode ? <Badge tone="warn">{t("status.demoActive")}</Badge>
+              : <Badge tone={connected ? "good" : "neutral"}>{connected ? t("status.connected") : t("status.disconnected")}</Badge>}
           </div>
         </div>
 
-        {connected && info.mock && <p className="mt-4 rounded-xl bg-amber-100 px-4 py-3 text-sm text-amber-900" role="status">{t("demo.banner")}</p>}
+        {demoMode && !open && (
+          <div className="mt-4 space-y-3">
+            <p className="rounded-xl bg-amber-100 px-4 py-3 text-sm text-amber-900" role="status">{t("demo.banner")}</p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="lg" onClick={() => { setError(""); setOpen(true); }} disabled={busy}>{t("demo.connectReal")}</Button>
+              <Button size="lg" variant="secondary" onClick={removeDemo} disabled={busy}>{t("demo.remove")}</Button>
+            </div>
+          </div>
+        )}
 
-        {connected ? (
-          <Connected t={t} locale={locale} info={info} connectedAt={connectedAt} onDone={() => router.refresh()} />
+        {connected && !open ? (
+          <Connected t={t} locale={locale} info={info} connectedAt={connectedAt} onDone={() => router.refresh()} demo={demoMode} tone={tone} lang={lang} />
         ) : !open ? (
           <div className="mt-5"><Button size="lg" onClick={() => setOpen(true)}>{t("shopify.connect")}</Button></div>
         ) : (
@@ -130,7 +150,7 @@ export function AddonsClient({ connected, connectedAt, info, oauth, channelsConn
               <Button type="submit" size="lg" disabled={busy || !shop || (!oauth && !manualReady)}>{busy ? (oauth ? t("form.connecting") : t("form.verifying")) : oauth ? t("form.continue") : t("form.verify")}</Button>
               <Button type="button" variant="ghost" onClick={() => { setOpen(false); setError(""); }}>{t("form.cancel")}</Button>
             </div>
-            {!channelsConnected && (
+            {!channelsConnected && !demoMode && (
               <div className="border-t border-line pt-4">
                 <Button type="button" variant="secondary" onClick={demo} disabled={busy}>{t("demo.button")}</Button>
                 <p className="mt-2 text-xs text-muted">{t("demo.hint")}</p>
@@ -145,9 +165,9 @@ export function AddonsClient({ connected, connectedAt, info, oauth, channelsConn
   );
 }
 
-function Connected({ t, locale, info, connectedAt, onDone }: {
+function Connected({ t, locale, info, connectedAt, onDone, demo, tone, lang }: {
   t: (k: string, v?: Record<string, string | number>) => string; locale: string;
-  info: Props["info"]; connectedAt: string | null; onDone: () => void;
+  info: Props["info"]; connectedAt: string | null; onDone: () => void; demo: boolean; tone: number; lang: "es" | "en";
 }) {
   const [order, setOrder] = useState("");
   const [email, setEmail] = useState("");
@@ -169,17 +189,20 @@ function Connected({ t, locale, info, connectedAt, onDone }: {
   }
   const date = connectedAt ? new Date(connectedAt).toLocaleDateString(locale === "en" ? "en-US" : "es-MX") : "";
 
-  const lines: string[] = [];
+  // "El asistente diría": the SAME engine templates the bot uses (src/lib/engine/templates.ts), with the tenant's
+  // tone and default language, so the preview never drifts from the real reply (P2-7).
+  const tn = T.clampTone(tone);
+  let said = "", problem = "";
   if (result) {
-    if (result.error) lines.push(t(`err.${result.error}` in dict.es ? `err.${result.error}` : "err.generic"));
-    else if (!result.found) lines.push(result.mayBeOutsideWindow || result.tooOld ? t("test.outsidewindow") : t("test.notfound"));
-    else {
-      lines.push(t("test.status", { status: result.statusText ?? "" }));
-      if (result.carrier) lines.push(t("test.carrier", { carrier: result.carrier }));
-      if (result.trackingNumber) lines.push(t("test.tracking", { number: result.trackingNumber }));
-      if (result.trackingUrl) lines.push(t("test.link", { url: result.trackingUrl }));
-      if (result.estimatedDelivery) lines.push(t("test.eta", { date: result.estimatedDelivery }));
-    }
+    if (result.error === "lookup_failed") said = T.orderLookupError(lang, tn);
+    else if (result.error) problem = t(`err.${result.error}` in dict.es ? `err.${result.error}` : "err.generic");
+    else if (!result.found) {
+      if (result.mayBeOutsideWindow || result.tooOld) problem = t("test.outsidewindow");
+      else said = T.orderNotFound(lang, tn);
+    } else said = T.orderFound(lang, tn, {
+      orderNumber: order.trim(), statusText: result.statusText, carrier: result.carrier, trackingNumber: result.trackingNumber,
+      trackingUrl: result.trackingUrl, estimatedDelivery: result.estimatedDelivery,
+    });
   }
 
   return (
@@ -199,16 +222,18 @@ function Connected({ t, locale, info, connectedAt, onDone }: {
         <Button type="submit" variant="secondary" disabled={busy || !order || !email}>{busy ? t("form.verifying") : t("test.run")}</Button>
         {result && (
           <div className="rounded-xl border border-line bg-canvas p-3 text-sm" role="status">
-            <p className="mb-1 text-xs font-medium text-muted">{t("test.result")}</p>
-            {lines.map((l, i) => <p key={i} className="text-ink break-words">{l}</p>)}
+            {said ? (<>
+              <p className="mb-1 text-xs font-medium text-muted">{t("test.result")}</p>
+              <p className="whitespace-pre-line break-words text-ink">{said}</p>
+            </>) : <p className="break-words text-ink">{problem}</p>}
           </div>
         )}
       </form>
 
-      <div className="border-t border-line pt-4">
+      {!demo && <div className="border-t border-line pt-4">
         <Button variant="ghost" onClick={() => setConfirmOpen(true)} className="text-danger">{t("conn.disconnect")}</Button>
         <ConfirmDialog open={confirmOpen} title={t("conn.confirm")} confirmLabel={t("conn.confirmYes")} cancelLabel={t("conn.cancel")} onConfirm={disconnect} onCancel={() => setConfirmOpen(false)} />
-      </div>
+      </div>}
     </div>
   );
 }

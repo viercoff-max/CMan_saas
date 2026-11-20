@@ -8,6 +8,7 @@ import type { TenantPlan } from "@/lib/data/types";
 import { loadUsageSummary } from "./data";
 import { billingDict } from "./dict";
 import { fmtDate, fmtMonth, fmtNum } from "./usage";
+import { contactEmail } from "@/lib/platform/brand";
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +85,15 @@ export default async function BillingPage() {
           );
         })}
       </ul>
-      <p className="mt-4 text-sm text-muted">{t("plan.change")}</p>
+      <PlanChange t={t} />
     </>
   );
+}
+
+/** "Para cambiar de plan, escríbenos a <mailto>" when the platform contact is configured (lib/platform/brand.ts). */
+function PlanChange({ t }: { t: (k: string, v?: Record<string, string | number>) => string }) {
+  const email = contactEmail();
+  if (!email) return <p className="mt-4 text-sm text-muted">{t("plan.changeSoon")}</p>;
+  const [before, after] = t("plan.change", { email: "@@EMAIL@@" }).split("@@EMAIL@@");
+  return <p className="mt-4 text-sm text-muted">{before}<a className="font-medium text-brand underline underline-offset-2" href={`mailto:${email}`}>{email}</a>{after}</p>;
 }

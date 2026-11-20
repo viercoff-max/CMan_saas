@@ -87,13 +87,14 @@ describe("scenario 4: human takeover", () => {
     expect((await getData().conversations.get(t.tenantId, id))!.status).toBe("human");
   });
 
-  it("Meta send failure -> 502 and the agent message is NOT stored as sent", async () => {
+  // Graph answers (#131047) = outside the 24 h window: a policy refusal, 422 (REVIEW-qa-2 P2-11; other upstream errors stay 502).
+  it("Meta send refused (24 h window) -> 422 and the agent message is NOT stored as sent", async () => {
     stubFetch({ graphStatus: 400 });
     await handleInbound(ev("hola"));
     const id = (await conv()).id;
     const count = (await getData().messages.list(t.tenantId, id)).length;
     const res = await reply(id, "Hola, ¿sigues ahí?");
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({ error: "send_failed" });
     expect(await getData().messages.list(t.tenantId, id)).toHaveLength(count);
   });

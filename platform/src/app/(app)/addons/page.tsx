@@ -12,8 +12,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
   const t = makeT(dict, locale);
   const { notice } = await searchParams;
   const data = getData();
-  const addon = await data.addons.get(session.tenantId, "shopify");
-  const channelsConnected = (await Promise.all((["whatsapp", "instagram", "messenger"] as const).map((c) => data.channels.get(session.tenantId, c))))
+  const [addon, settings] = await Promise.all([data.addons.get(session.tenantId, "shopify"), data.settings.get(session.tenantId)]);
+  // A tenant with a live channel (Telegram included) gets no demo-store shortcut: real customers would see sample orders.
+  const channelsConnected = (await Promise.all((["telegram", "whatsapp", "instagram", "messenger"] as const).map((c) => data.channels.get(session.tenantId, c))))
     .some((a) => a.status === "connected");
   const noticeKey = notice === "shopify_connected" || notice === "shopify_error" ? `notice.${notice}` : null;
 
@@ -31,6 +32,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
         oauth={oauthConfigured()}
         channelsConnected={channelsConnected}
         notice={noticeKey ? { text: t(noticeKey), ok: notice === "shopify_connected" } : null}
+        tone={settings.toneLevel}
+        lang={settings.languageDefault === "en" ? "en" : "es"}
       />
     </>
   );

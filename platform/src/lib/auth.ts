@@ -100,6 +100,10 @@ async function sqliteAuthState(): Promise<AuthState> {
   const data = getData();
   const u = await data.users.get(userId);
   if (!u) return { status: "anonymous" };
+  // L1: a suspended / deleted tenant gives no app access (one tenant per user in SQLite mode).
+  if (!(await data.tenants.isActive(u.tenantId))) {
+    return { status: "no_tenant", user: { id: u.id, email: u.email, name: u.name }, suspended: true };
+  }
   // Role from the users table (least privilege if the row is somehow missing from the member list).
   const found = (await data.members.list(u.tenantId)).find((m) => m.userId === u.id)?.role;
   const role: Role = isRole(found) ? found : "agent";

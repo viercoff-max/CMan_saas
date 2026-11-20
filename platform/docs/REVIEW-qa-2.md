@@ -159,3 +159,60 @@ Dev-only notes (not product bugs):
 - **Link sources**: adding a URL, and "Actualizar" on the demo link source, were not clicked (they would fetch `example.com`).
 - **Onboarding**: `/onboarding` redirects to `/dashboard` because the tenant was already set up (`desktop-es-onboarding.png` shows the redirect).
 - **Not exercised**: retention or purge, the handoff email outbox, rate-limit lockout after repeated failures (only one wrong password was tried), dark mode, and screen-reader runs (only the ARIA attributes were checked).
+
+---
+
+## Fix status (wave 4, fixer F2: UX + QA, 2026-11-19)
+
+Scope: the inbox / channels / add-ons / dashboard / billing / brand / context / tone / team UI, login / signup / onboarding UI, the shell, the public site and `src/lib/platform/**`, plus the inbox route handlers. Engine copy, the demo seed and the `/platform` page belong to other owners (requests in `docs/REQUESTS.md`).
+
+### P1 (7/7 fixed)
+
+| # | Status | How |
+|---|---|---|
+| P1-1 | Fixed | New key `tg.needsHttpsNoBot` for a tenant with no bot (no claim that a bot was saved, no mention of the button). "Volver a registrar webhook" is only mentioned and shown once a bot is connected; agents get their own copy. |
+| P1-2 | Fixed | `isDemoConversation` (`inbox/kinds.ts`): the reply route stores the agent reply (`meta.demo/notSent`), takes the conversation over and sends nothing. The thread shows "Esta conversación es de demostración: la respuesta se guarda pero no se envía a ningún canal." and a "Respuesta guardada…" confirmation. A channel that is not connected now answers 409. |
+| P1-3 | Fixed | Below `md`, an open conversation or the simulator hides the page header, waiting banner and filters; the composer (thread and simulator) is `sticky bottom-0` with safe-area padding. |
+| P1-4 | Fixed | `src/lib/platform/channels.ts` is the single availability source (Telegram available; WhatsApp, Instagram, Messenger "Próximamente"). The landing chips, billing copy and `/channels` read it. The Meta cards have no forms or connect buttons (a legacy connection can still be removed). The platform `META_VERIFY_TOKEN` and webhook settings are no longer rendered (security L7). |
+| P1-5 | Fixed | Demo store: one badge "Tienda de demostración activa", primary "Conectar mi tienda real" (opens the connect form), secondary "Quitar demostración". |
+| P1-6 | Fixed | Urgent = waiting with reason safety/legal: red "⚠ Urgente · seguridad/legal" pill, red left accent, sorted first, banner "N clientes esperan a una persona · 1 urgente", and a separate urgent line on the dashboard KPI. |
+| P1-7 | Fixed (owner input still needed) | `brand.ts` holds owner-fillable `legalEntityName`, `privacyContactEmail`, `legalAddress` (+ optional `supportEmail`). Missing values render as highlighted "[Completar: razón social]" fields, every legal page shows a "Completar antes de publicar" notice, the contact becomes a `mailto:` link once set, and `/eliminar-datos` has a direct "Pedir la eliminación por correo" action. Draft banner and noindex unchanged. |
+
+### P2 (24 fixed, 6 skipped)
+
+| # | Status | Notes |
+|---|---|---|
+| 1 | Fixed | Dashboard, inbox banner/API and sidebar badge all read `loadInboxCounts`; the KPI counts `needs_human` only. |
+| 2 | Fixed | "Con el asistente ahora". |
+| 3 | Fixed | 2x2 KPI grid on phones, smaller cards. |
+| 4 | Skipped | Engine greeting composition (F3). |
+| 5 | Skipped | Engine order-status phrase map (F3). The add-on preview now reuses the engine template, so it follows F3's fix automatically. |
+| 6 | Skipped | Engine date formatting (F3). Same note as 5. |
+| 7 | Fixed | The add-on preview is `T.orderFound / orderNotFound / orderLookupError` with the tenant's tone and default language. |
+| 8 | Skipped | Engine media copy (F3). |
+| 9 | Fixed | After a handoff the simulator input and chips are disabled and "Empezar de nuevo" becomes primary. |
+| 10 | Fixed | Simulator fills its column, taller log on desktop, sticky composer. |
+| 11 | Fixed | 409 (not connected), 422 (window closed, bot blocked, chat gone), 429 (rate limited), 502 (other). |
+| 12 | Fixed | Token errors render under the field with `aria-invalid` + `aria-describedby`. |
+| 13 | Fixed | The Meta cards have no buttons; Telegram's "Conectar y probar" is the only primary. |
+| 14 | Fixed | The technical Meta section (with `docs/GO-LIVE.md`) is gone. |
+| 15 | Fixed | "Se guarda al instante" on the file mode and the data-source hint. |
+| 16 | Fixed | "El asistente usa: lo que escribiste" / "…el archivo {name}". |
+| 17 | Fixed | Bigger bottom padding plus `scroll-margin-bottom` on the context form controls. |
+| 18 | Fixed | `aria-valuetext="Nivel 4 de 5: amigable"`; 44px slider hit area. |
+| 19 | Fixed | `.range-brand`: filled `--brand`, unfilled `--line` (no browser-picked dark track). |
+| 20 | Fixed | The level chip is ink on `--brand-soft` (AA-tested pair). |
+| 21 | Fixed | The field is "Nombre de tu negocio en el panel", and "Dónde se ve tu marca" explains what customers see. |
+| 22 | Fixed | Colour pickers have `aria-label`. |
+| 23 | Fixed | Team and signup copy without "Supabase", "Administrador(a)", and plan change shows a `mailto:` when `supportEmail`/`privacyContactEmail` is set (otherwise "Pronto podrás cambiar de plan desde aquí."). |
+| 24 | Fixed | Billing excludes demo conversations; the hint says so. |
+| 25 | Fixed | "unidades de IA" in billing and in the `/platform` dict. |
+| 26 | Skipped | `/platform` page layout and the shell link are outside F2's files (request filed). |
+| 27 | Fixed | Root metadata comes from `PLATFORM_BRAND` (title template, description, noindex); no "Social Inbox" in `src/`. |
+| 28 | Fixed | Auth screens show the platform logo and name, a home link and a language switch; local mode explains who resets passwords; `/login` and `/signup` are noindex; the error ends with a period. |
+| 29 | Fixed | Phones get a "☰ Menú" button (44px) that opens the full navigation panel (Esc closes it, navigating closes it, a red dot shows waiting customers). Public footer links are 44px tall. |
+| 30 | Partly fixed | The dashboard subtitle no longer repeats the checklist title. The demo seed items (Pablo's reason, past ETA) belong to `src/lib/demo` (request filed). |
+
+Also changed: inbox Telegram filter (Telegram is now in the platform filter; the Meta options were removed), labels for `ai_cap_reached`, and send-error copy for `telegram_bot_blocked_by_user` ("El cliente bloqueó el bot; no podemos enviarle mensajes"), `rate_limited` and `telegram_chat_not_found`. The context, channels and simulator placeholders are generic (Chefman stays only in the demo data).
+
+Tests added or updated: `src/e2e/inbox-demo.e2e.test.ts` (demo reply stored, nothing sent, 409, counts loader equals API, urgent count, cross-tenant negatives), `inbox/__tests__/kinds.test.ts`, `inbox/__tests__/send-errors.test.ts` (Telegram keys, HTTP statuses), `channels/__tests__/channels-client.test.ts` (no-bot copy, "Próximamente", no verify token), `lib/platform/__tests__/legal-channels.test.ts` (single availability source, legal markers and notice), `billing/__tests__/usage.test.ts` (demo excluded), and `src/e2e/takeover.e2e.test.ts` (window refusal is now 422).

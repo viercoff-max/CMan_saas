@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { getData } from "@/lib/data";
 import { cookies } from "next/headers";
 import { getAuthState, logout, setActiveTenant } from "@/lib/auth";
 import { authBackend } from "@/lib/auth/backend";
@@ -9,6 +8,7 @@ import { ensureSeed } from "@/lib/seed";
 import { LocaleProvider } from "@/lib/i18n-client";
 import { Sidebar } from "@/components/Sidebar";
 import { loadShellBrand } from "@/lib/brand/server";
+import { loadInboxCounts } from "./inbox/counts";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +20,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const session = st.session;
   const locale = await getLocale();
   const tenantName = session.tenants.find((t) => t.id === session.tenantId)?.name || session.tenantId;
-  const [counts, brand] = await Promise.all([
-    getData().conversations.countByStatus(session.tenantId),
+  const [{ counts }, brand] = await Promise.all([
+    loadInboxCounts(session.tenantId), // same loader as the inbox banner and the dashboard KPI
     // Tenant theme computed HERE (server side) and applied as an inline style: no flash of the default colours.
     loadShellBrand(session.tenantId, tenantName),
   ]);

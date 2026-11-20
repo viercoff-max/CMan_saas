@@ -140,7 +140,7 @@ export function ContextForm({ initial, modes: initialModes, files: initialFiles,
   );
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="scroll-clear-bar space-y-4 pb-40">
       <Card>
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm font-medium text-ink">{t("ctx.meter", { n: filled, total })}</p>

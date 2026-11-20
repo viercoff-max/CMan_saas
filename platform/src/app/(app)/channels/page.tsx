@@ -2,6 +2,7 @@ import { getSession, hasRole } from "@/lib/auth";
 import { getData } from "@/lib/data";
 import { maskTelegramToken, telegramWebhookReachable } from "@/lib/channels/telegram";
 import type { TelegramChannelSecrets } from "@/lib/channels/telegram-secret";
+import { isChannelAvailable } from "@/lib/platform/channels";
 import { ChannelsClient, type AccountView, type TelegramView } from "./ChannelsClient";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ export default async function ChannelsPage() {
   const data = getData();
   const accounts: AccountView[] = await Promise.all((["whatsapp", "instagram", "messenger"] as const).map(async (ch) => {
     const a = await data.channels.get(s.tenantId, ch);
-    return { channel: ch, status: a.status, name: String(a.publicInfo.displayName ?? a.publicInfo.externalId ?? "") };
+    return { channel: ch, status: a.status, name: String(a.publicInfo.displayName ?? a.publicInfo.externalId ?? ""), available: isChannelAvailable(ch) };
   }));
 
   const tg = await data.channels.get(s.tenantId, "telegram");
@@ -30,6 +31,6 @@ export default async function ChannelsPage() {
     canEdit: hasRole(s.role, "admin"),
   };
 
-  const base = (process.env.PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");
-  return <ChannelsClient telegram={telegram} accounts={accounts} webhookUrl={`${base}/api/webhooks/meta`} verifyToken={process.env.META_VERIFY_TOKEN ?? ""} />;
+  // The platform's Meta webhook URL and META_VERIFY_TOKEN are platform config: never rendered to tenants (L7).
+  return <ChannelsClient telegram={telegram} accounts={accounts} />;
 }

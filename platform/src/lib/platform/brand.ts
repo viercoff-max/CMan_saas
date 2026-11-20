@@ -17,12 +17,33 @@ export const PLATFORM_BRAND = {
     deepMuted: "#9CC3BD",
   },
   /**
-   * Contact for privacy / data-deletion requests and the legal entity ("responsable"). Unknown today: the legal
-   * pages print "por definir" while these are null. Fill them in before publishing.
+   * OWNER-FILLABLE legal fields (REVIEW-qa-2 P1-7). While any of them is null the legal pages show a highlighted
+   * "[Completar: …]" field and a "Completar antes de publicar" notice, and stay noindex. Fill them in HERE before the
+   * privacy / terms / deletion URLs are given to Meta or published:
+   *  - legalEntityName: razón social of the "responsable" (LFPDPPP), e.g. "Mi Empresa, S.A. de C.V."
+   *  - privacyContactEmail: inbox that receives ARCO and data-deletion requests (shown as a mailto: link)
+   *  - legalAddress: domicilio del responsable (LFPDPPP art. 16)
+   *  - supportEmail: commercial contact (plan changes); optional, falls back to privacyContactEmail
    */
   privacyContactEmail: null as string | null,
   legalEntityName: null as string | null,
+  legalAddress: null as string | null,
+  supportEmail: null as string | null,
 } as const;
+
+export type LegalField = "legalEntityName" | "privacyContactEmail" | "legalAddress";
+export const LEGAL_FIELDS: readonly LegalField[] = ["legalEntityName", "privacyContactEmail", "legalAddress"];
+export const LEGAL_FIELD_LABEL: Record<LegalField, Record<Locale, string>> = {
+  legalEntityName: { es: "razón social", en: "legal entity name" },
+  privacyContactEmail: { es: "correo de contacto de privacidad", en: "privacy contact e-mail" },
+  legalAddress: { es: "domicilio", en: "address" },
+};
+/** Legal fields still empty (the pages must not be published while this is non-empty). */
+export function missingLegalFields(b: { [K in LegalField]: string | null } = PLATFORM_BRAND): LegalField[] {
+  return LEGAL_FIELDS.filter((f) => !b[f]?.trim());
+}
+/** Commercial contact, falling back to the privacy contact. */
+export const contactEmail = (): string | null => PLATFORM_BRAND.supportEmail ?? PLATFORM_BRAND.privacyContactEmail;
 
 /**
  * SEO switch. While false, EVERY public page sends `robots: noindex, nofollow` (see seo.ts). Flip to true only when

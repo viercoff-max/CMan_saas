@@ -1,20 +1,26 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Badge, Button, Card, ConfirmDialog, Field, PageHeader, inputCls } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, PageHeader, inputCls } from "@/components/ui";
 import { useT } from "@/lib/i18n-client";
 import { channelsDict } from "./dict";
-import { connectChannel, connectTelegram, disconnectChannel, disconnectTelegram, reregisterTelegramWebhook, type TelegramWebhookState } from "./actions";
+import { connectTelegram, disconnectChannel, disconnectTelegram, reregisterTelegramWebhook, type TelegramWebhookState } from "./actions";
 
 type Ch = "whatsapp" | "instagram" | "messenger";
-export interface AccountView { channel: Ch; status: "connected" | "disconnected" | "error"; name: string }
+/** `available` comes from src/lib/platform/channels.ts (single source of truth with the public site and billing). */
+export interface AccountView { channel: Ch; status: "connected" | "disconnected" | "error"; name: string; available: boolean }
 
 export interface TelegramView {
   status: "connected" | "disconnected" | "error"; username: string; connectedAt: string;
   webhook: TelegramWebhookState; tokenHint: string; reachable: boolean; canEdit: boolean;
 }
 
-export function ChannelsClient({ telegram, accounts, webhookUrl, verifyToken }: { telegram: TelegramView; accounts: AccountView[]; webhookUrl: string; verifyToken: string }) {
+/**
+ * MVP: Telegram is the only live channel. WhatsApp / Instagram / Messenger are shown as "Próximamente" (no forms, no
+ * buttons), the same as on the public site (REVIEW-qa-2 P1-4). The platform's Meta webhook settings (verify token)
+ * are platform config and are never shown to tenants (REVIEW-security-2 L7).
+ */
+export function ChannelsClient({ telegram, accounts }: { telegram: TelegramView; accounts: AccountView[] }) {
   const t = useT(channelsDict);
   return (
     <div>
@@ -26,47 +32,14 @@ export function ChannelsClient({ telegram, accounts, webhookUrl, verifyToken }: 
           <div className="grid gap-4">
             {accounts.map((a) => <ChannelCard key={a.channel} a={a} />)}
           </div>
+          <p className="mt-4 rounded-xl bg-canvas p-3 text-sm text-muted">{t("tech.test")}</p>
         </section>
       </div>
-
-      <details className="mt-6 rounded-2xl border border-line bg-surface shadow-sm">
-        <summary className="min-h-[44px] cursor-pointer select-none rounded-2xl px-5 py-3 text-base font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50">
-          {t("tech.title")}
-        </summary>
-        <div className="px-5 pb-5">
-          <p className="text-sm text-muted">{t("tech.intro")}</p>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <CopyField label={t("tech.url")} value={webhookUrl} />
-            <CopyField label={t("tech.token")} value={verifyToken} empty={t("tech.noToken")} />
-          </div>
-          <ul className="mt-4 space-y-1 text-sm text-ink">
-            <li>{t("tech.1")}</li><li>{t("tech.2")}</li><li>{t("tech.3")}</li>
-          </ul>
-          <p className="mt-4 rounded-xl bg-canvas p-3 text-sm text-muted">{t("tech.test")}</p>
-        </div>
-      </details>
     </div>
   );
 }
 
-function CopyField({ label, value, empty }: { label: string; value: string; empty?: string }) {
-  const t = useT(channelsDict);
-  const [done, setDone] = useState(false);
-  async function copy() {
-    try { await navigator.clipboard.writeText(value); setDone(true); setTimeout(() => setDone(false), 1500); } catch { /* clipboard blocked */ }
-  }
-  return (
-    <div>
-      <span className="mb-1 block text-sm font-medium text-ink">{label}</span>
-      <div className="flex gap-2">
-        <input readOnly aria-label={label} className={`${inputCls} min-h-[44px] text-base md:text-sm`} value={value || empty || ""} onFocus={(e) => e.currentTarget.select()} />
-        <Button variant="secondary" className="min-h-[44px]" onClick={copy} disabled={!value}>{done ? t("copied") : t("copy")}</Button>
-      </div>
-    </div>
-  );
-}
-
-/** Collapsed "where do I find this?" steps, one per field. */
+/** Collapsed "where do I find this?" steps. */
 function Help({ text }: { text: string }) {
   const t = useT(channelsDict);
   return (
@@ -79,80 +52,34 @@ function Help({ text }: { text: string }) {
   );
 }
 
+/** Meta channel: "Próximamente" (no form). A legacy connection made before the MVP switch can still be removed. */
 function ChannelCard({ a }: { a: AccountView }) {
   const t = useT(channelsDict);
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
-  const [form, setForm] = useState({ externalId: "", accessToken: "", wabaId: "" });
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [confirm, setConfirm] = useState(false);
   const connected = a.status === "connected";
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
-
-  function save() {
-    setMsg(null);
-    start(async () => {
-      try {
-        const r = await connectChannel(a.channel, a.channel === "whatsapp" ? form : { externalId: form.externalId, accessToken: form.accessToken });
-        if (r.ok) {
-          setForm({ externalId: "", accessToken: "", wabaId: "" }); setOpen(false);
-          setMsg({ ok: true, text: t("saved", { name: r.name }) }); router.refresh();
-        } else setMsg({ ok: false, text: t(`err.${r.error}`) });
-      } catch { setMsg({ ok: false, text: t("err.network") }); }
-    });
-  }
   function disconnect() {
-    if (!window.confirm(t("confirmDisconnect"))) return;
-    start(async () => { await disconnectChannel(a.channel); setMsg(null); router.refresh(); });
+    setConfirm(false);
+    start(async () => { await disconnectChannel(a.channel); router.refresh(); });
   }
-
   return (
-    <Card className="flex flex-col">
+    <Card className={`flex flex-col ${connected || a.available ? "" : "opacity-90"}`}>
       <div className="flex items-start justify-between gap-2">
-        <h2 className="text-lg font-semibold">{t(`c.${a.channel}`)}</h2>
-        <Badge tone={connected ? "good" : a.status === "error" ? "bad" : "neutral"}>{t(a.status)}</Badge>
+        <h3 className="text-lg font-semibold">{t(`c.${a.channel}`)}</h3>
+        {connected ? <Badge tone="good">{t("connected")}</Badge> : <Badge>{t("soon")}</Badge>}
       </div>
       <p className="mt-1 text-sm text-muted">{t(`d.${a.channel}`)}</p>
-      {connected && a.name && <p className="mt-2 text-sm">{t("connectedAs", { name: a.name })}</p>}
-      <div role="status" aria-live="polite">
-        {msg && <p className={`mt-2 text-sm ${msg.ok ? "text-[var(--ok,#15803d)]" : "text-danger"}`}>{msg.text}</p>}
-        {pending && open && <p className="mt-2 text-sm text-muted">{t("testing")}</p>}
-      </div>
-
-      {open ? (
-        <form className="mt-4 space-y-4" autoComplete="off" onSubmit={(e) => { e.preventDefault(); save(); }}>
-          <div>
-            <Field label={t(`f.${a.channel}.id`)}><input required inputMode="numeric" className={`${inputCls} min-h-[44px] text-base md:text-sm`} value={form.externalId} onChange={set("externalId")} /></Field>
-            <Help text={t(`f.${a.channel}.id.help`)} />
-          </div>
-          <div>
-            <Field label={t(`f.${a.channel}.token`)} hint={`${t("tokenWarn")} ${t("f.secretHint")}`}>
-              <input required type="password" autoComplete="new-password" className={`${inputCls} min-h-[44px] text-base md:text-sm`} value={form.accessToken} onChange={set("accessToken")} />
-            </Field>
-            <Help text={t(`f.${a.channel}.token.help`)} />
-          </div>
-          {a.channel === "whatsapp" && (
-            <div>
-              <Field label={t("f.whatsapp.waba")}><input required inputMode="numeric" className={`${inputCls} min-h-[44px] text-base md:text-sm`} value={form.wabaId} onChange={set("wabaId")} /></Field>
-              <Help text={t("f.whatsapp.waba.help")} />
-            </div>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" className="min-h-[44px]" disabled={pending}>{pending ? t("testing") : t("save")}</Button>
-            <Button type="button" variant="ghost" className="min-h-[44px]" onClick={() => setOpen(false)} disabled={pending}>{t("cancel")}</Button>
-          </div>
-        </form>
+      {connected ? (
+        <>
+          {a.name && <p className="mt-2 text-sm">{t("connectedAs", { name: a.name })}</p>}
+          <p className="mt-2 text-sm text-muted">{t("legacy")}</p>
+          <div className="mt-3"><Button variant="ghost" className="min-h-[44px]" onClick={() => setConfirm(true)} disabled={pending}>{t("disconnect")}</Button></div>
+          <ConfirmDialog open={confirm} title={t("confirmDisconnect")} confirmLabel={t("disconnect")} cancelLabel={t("cancel")}
+            onConfirm={disconnect} onCancel={() => setConfirm(false)} />
+        </>
       ) : (
-        <div className="mt-auto flex flex-wrap gap-2 pt-4">
-          {connected ? (
-            <>
-              <Button variant="secondary" className="min-h-[44px]" onClick={() => { setMsg(null); setOpen(true); }} disabled={pending}>{t("reconnect")}</Button>
-              <Button variant="ghost" className="min-h-[44px]" onClick={disconnect} disabled={pending}>{t("disconnect")}</Button>
-            </>
-          ) : (
-            <Button className="min-h-[44px]" onClick={() => { setMsg(null); setOpen(true); }} disabled={pending}>{t("connect")}</Button>
-          )}
-        </div>
+        <p className="mt-3 text-sm text-ink">{t("soon.body")}</p>
       )}
     </Card>
   );
@@ -165,16 +92,19 @@ function TelegramCard({ v }: { v: TelegramView }) {
   const [pending, start] = useTransition();
   const [token, setToken] = useState("");
   const [msg, setMsg] = useState<{ tone: "ok" | "warn" | "bad"; text: string } | null>(null);
+  const [fieldError, setFieldError] = useState("");
   const [confirm, setConfirm] = useState(false);
+  const ids = { field: useId(), hint: useId(), error: useId() };
   const connected = v.status === "connected";
   const fmtDate = (iso: string) => {
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
   };
+  // Only shown after a bot IS saved, so mentioning the re-register button is correct here.
   const webhookNote = (w: TelegramWebhookState) => (w === "ok" ? null : w === "needs_https" ? t("tg.needsHttps") : t("tg.webhookFailed"));
 
   function save() {
-    setMsg(null);
+    setMsg(null); setFieldError("");
     start(async () => {
       try {
         const r = await connectTelegram({ botToken: token });
@@ -184,7 +114,8 @@ function TelegramCard({ v }: { v: TelegramView }) {
           const note = webhookNote(r.webhook);
           setMsg(note ? { tone: "warn", text: `${saved} ${note}` } : { tone: "ok", text: saved });
           router.refresh();
-        } else setMsg({ tone: "bad", text: t(`tg.err.${r.error}`) });
+        } else if (r.error === "invalid" || r.error === "token") setFieldError(t(`tg.err.${r.error}`)); // next to the field
+        else setMsg({ tone: "bad", text: t(`tg.err.${r.error}`) });
       } catch { setMsg({ tone: "bad", text: t("tg.err.network") }); }
     });
   }
@@ -221,11 +152,12 @@ function TelegramCard({ v }: { v: TelegramView }) {
       )}
       {connected && v.webhook !== "ok" && (
         <div className="mt-3 rounded-xl bg-[var(--warn-bg,#fffbeb)] p-3 text-sm text-ink">
-          <p>{v.webhook === "needs_https" || !v.reachable ? t("tg.needsHttps") : t("tg.webhookFailed")}</p>
+          <p>{v.webhook === "needs_https" || !v.reachable ? (v.canEdit ? t("tg.needsHttps") : t("tg.needsHttpsAgent")) : (v.canEdit ? t("tg.webhookFailed") : t("tg.webhookFailedAgent"))}</p>
           {v.canEdit && <Button variant="secondary" className="mt-2 min-h-[44px]" onClick={reregister} disabled={pending}>{t("tg.reregister")}</Button>}
         </div>
       )}
-      {!connected && !v.reachable && <p className="mt-3 rounded-xl bg-[var(--warn-bg,#fffbeb)] p-3 text-sm text-ink">{t("tg.needsHttps")}</p>}
+      {/* No bot yet: explain the HTTPS requirement without claiming a bot exists or pointing at a missing button (P1-1). */}
+      {!connected && !v.reachable && <p className="mt-3 rounded-xl bg-[var(--warn-bg,#fffbeb)] p-3 text-sm text-ink">{t("tg.needsHttpsNoBot")}</p>}
 
       {connected && v.username && (
         <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
@@ -249,10 +181,15 @@ function TelegramCard({ v }: { v: TelegramView }) {
           </ol>
           <Help text={t("tg.help")} />
           {connected && v.tokenHint && <p className="text-sm text-muted">{t("tg.currentToken")} <span className="font-mono">{v.tokenHint}</span></p>}
-          <Field label={connected ? t("tg.newToken") : t("tg.token")} hint={`${t("tokenWarn")} ${t("f.secretHint")}`}>
-            <input required type="password" autoComplete="new-password" spellCheck={false} placeholder={t("tg.placeholder")}
-              className={`${inputCls} min-h-[44px] font-mono text-base md:text-sm`} value={token} onChange={(e) => setToken(e.target.value)} />
-          </Field>
+          <div>
+            <label htmlFor={ids.field} className="mb-1 block text-sm font-medium text-ink">{connected ? t("tg.newToken") : t("tg.token")}</label>
+            <input id={ids.field} required type="password" autoComplete="new-password" spellCheck={false} placeholder={t("tg.placeholder")}
+              aria-invalid={fieldError ? true : undefined} aria-describedby={fieldError ? `${ids.error} ${ids.hint}` : ids.hint}
+              className={`${inputCls} min-h-[44px] font-mono text-base md:text-sm ${fieldError ? "border-danger" : ""}`} value={token}
+              onChange={(e) => { setToken(e.target.value); if (fieldError) setFieldError(""); }} />
+            {fieldError && <p id={ids.error} role="alert" className="mt-1 text-sm text-danger">{fieldError}</p>}
+            <span id={ids.hint} className="mt-1 block text-xs text-muted">{`${t("tokenWarn")} ${t("f.secretHint")}`}</span>
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             {connected ? <Button type="button" variant="ghost" className="min-h-[44px]" onClick={() => setConfirm(true)} disabled={pending}>{t("disconnect")}</Button> : <span />}
             <Button type="submit" className="min-h-[44px]" disabled={pending || !token.trim()}>{pending ? t("testing") : t("save")}</Button>

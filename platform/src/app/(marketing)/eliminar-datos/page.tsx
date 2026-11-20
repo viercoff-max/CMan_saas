@@ -16,5 +16,5 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function DeletionPage() {
   const locale = await getLocale();
-  return <LegalDocView doc={deletion[locale]} locale={locale} draft={LEGAL_DRAFT} />;
+  return <LegalDocView doc={deletion[locale]} locale={locale} draft={LEGAL_DRAFT} deletion />;
 }

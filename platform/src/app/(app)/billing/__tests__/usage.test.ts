@@ -46,6 +46,14 @@ describe("dates", () => {
       { channel: "telegram", lastMessageAt: "not a date" },
     ], now)).toBe(2);
   });
+  it("seeded demo conversations do not count as real customers (P2-24)", () => {
+    const now = new Date("2026-11-19T12:00:00Z");
+    expect(countConversationsThisMonth([
+      { channel: "telegram", externalId: "demo-andrea", lastMessageAt: "2026-11-10T00:00:00Z" },
+      { channel: "telegram", externalId: "123", state: { demo: true }, lastMessageAt: "2026-11-10T00:00:00Z" },
+      { channel: "telegram", externalId: "5215512345678", lastMessageAt: "2026-11-10T00:00:00Z" },
+    ], now)).toBe(1);
+  });
 });
 
 describe("loadUsageSummary (SQLite)", () => {

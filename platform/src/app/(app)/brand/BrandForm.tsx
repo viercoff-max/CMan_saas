@@ -117,7 +117,7 @@ export function BrandForm({ initial, mode = "full", doneHref = "/dashboard" }: {
     <div>
       <span id={`${ids}-${k}`} className="mb-1 block text-sm font-medium text-ink">{label}</span>
       <div className="flex gap-2">
-        <input type="color" aria-labelledby={`${ids}-${k}`} value={valid[k].toLowerCase()} onChange={(e) => setColor(k, e.target.value.toUpperCase())}
+        <input type="color" aria-label={label} value={valid[k].toLowerCase()} onChange={(e) => setColor(k, e.target.value.toUpperCase())}
           className="h-11 w-14 shrink-0 cursor-pointer rounded-xl border border-line bg-surface p-1" />
         <input aria-label={`${label}: ${t("hex")}`} value={hex[k]} maxLength={7} spellCheck={false} autoCapitalize="characters"
           onChange={(e) => setColor(k, e.target.value.trim())} aria-invalid={errors[k] ? true : undefined}

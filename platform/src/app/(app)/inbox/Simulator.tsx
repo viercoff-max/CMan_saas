@@ -11,7 +11,7 @@ const STARTERS = [
   { key: "sim.s1", text: "Mi pedido #1001" },
   { key: "sim.s2", text: "Garantía" },
   { key: "sim.s3", text: "Hablar con una persona" },
-  { key: "sim.s4", text: "Mi licuadora echó humo" },
+  { key: "sim.s4", text: "Mi producto echó humo" },
 ];
 
 export function Simulator({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
@@ -52,9 +52,11 @@ export function Simulator({ onClose, onChanged }: { onClose: () => void; onChang
     finally { setBusy(false); onChanged(); }
   }
 
-  const withPerson = conv && (conv.status === "human" || conv.status === "needs_human");
+  // After a handoff nothing answers any more: lock the input and make "Empezar de nuevo" the main action (P2-9).
+  const withPerson = !!conv && (conv.status === "human" || conv.status === "needs_human");
+  const locked = busy || withPerson;
   return (
-    <Card className="mx-auto flex max-w-md flex-col p-0">
+    <Card className="flex w-full flex-col p-0">
       <div className="border-b border-line p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -66,7 +68,7 @@ export function Simulator({ onClose, onChanged }: { onClose: () => void; onChang
         </div>
         <p className="mt-1 text-xs text-muted">{t("sim.sub")}</p>
       </div>
-      <div role="log" aria-live="polite" aria-label={t("sim.log")} tabIndex={0} className="h-[50vh] min-h-[300px] space-y-2 overflow-y-auto bg-canvas p-4">
+      <div role="log" aria-live="polite" aria-label={t("sim.log")} tabIndex={0} className="h-[45vh] min-h-[220px] space-y-2 overflow-y-auto bg-canvas p-4 md:h-[calc(100vh-24rem)] md:min-h-[300px]">
         {messages.length === 0 && <p className="py-10 text-center text-sm text-muted">{t("sim.empty")}</p>}
         {messages.map((m) => (
           <div key={m.id} className={`flex ${m.sender === "customer" ? "justify-end" : "justify-start"}`}>
@@ -79,25 +81,26 @@ export function Simulator({ onClose, onChanged }: { onClose: () => void; onChang
         {busy && <p className="text-xs text-muted" aria-hidden>…</p>}
         <div ref={endRef} />
       </div>
-      <div className="space-y-3 border-t border-line p-4">
-        {withPerson && <p className="text-xs text-muted">{t("sim.human")}</p>}
+      {/* Sticky composer: on phones and short desktop screens the input stays in view (REVIEW-qa-2 P1-3, P2-10). */}
+      <div className="sticky bottom-0 z-10 space-y-3 rounded-b-2xl border-t border-line bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        {withPerson && <p role="status" className="text-sm text-ink">{t("sim.human")}</p>}
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-        <div>
+        {!withPerson && <div>
           <p className="mb-1.5 text-xs font-medium text-muted">{t("sim.starters")}</p>
           <div className="flex flex-wrap gap-2">
             {STARTERS.map((s) => (
-              <button key={s.key} type="button" disabled={busy} onClick={() => void send(s.text)}
+              <button key={s.key} type="button" disabled={locked} onClick={() => void send(s.text)}
                 className="inline-flex min-h-[44px] items-center rounded-full border border-line bg-surface px-4 text-sm font-medium text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 disabled:opacity-50">
                 {t(s.key)}
               </button>
             ))}
           </div>
-        </div>
+        </div>}
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void send(text); }}>
-          <input className={`${inputCls} min-h-[44px] text-base md:text-sm`} value={text} aria-label={t("sim.label")} placeholder={t("sim.placeholder")} maxLength={2000} onChange={(e) => setText(e.target.value)} />
-          <Button type="submit" className="min-h-[44px]" disabled={busy || !text.trim()}>{t("sim.send")}</Button>
+          <input disabled={withPerson} className={`${inputCls} min-h-[44px] text-base disabled:opacity-60 md:text-sm`} value={text} aria-label={t("sim.label")} placeholder={t("sim.placeholder")} maxLength={2000} onChange={(e) => setText(e.target.value)} />
+          <Button type="submit" className="min-h-[44px]" disabled={locked || !text.trim()}>{t("sim.send")}</Button>
         </form>
-        <Button type="button" variant="ghost" className="min-h-[44px]" onClick={reset} disabled={busy}>{t("sim.reset")}</Button>
+        <Button type="button" variant={withPerson ? "primary" : "ghost"} className="min-h-[44px]" onClick={reset} disabled={busy}>{t("sim.reset")}</Button>
       </div>
     </Card>
   );

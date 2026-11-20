@@ -72,13 +72,16 @@ export function ToneForm({ initial, hoursSaved = true }: { initial: ToneInitial;
       <Card>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-semibold text-ink">{t("tone.level")}</h2>
-          <span className="rounded-full bg-brand/10 px-3 py-1 text-sm font-medium text-brand">{t("tone.level.n", { n: v.toneLevel })}</span>
+          {/* Ink on the soft brand tint: AA for any tenant colour (amber failed with brand text, P2-20). */}
+          <span className="rounded-full bg-brand-soft px-3 py-1 text-sm font-medium text-ink">{t("tone.level.n", { n: v.toneLevel })}</span>
         </div>
         <input
           type="range" min={1} max={5} step={1} value={v.toneLevel}
           aria-label={t("tone.level")}
+          aria-valuetext={t("tone.level.vt", { n: v.toneLevel, desc: t(`tone.level.d${T.clampTone(v.toneLevel)}`) })}
           onChange={(e) => set("toneLevel", Number(e.target.value))}
-          className="h-3 w-full cursor-pointer accent-brand"
+          style={{ "--pct": `${((T.clampTone(v.toneLevel) - 1) / 4) * 100}%` } as React.CSSProperties}
+          className="range-brand w-full"
         />
         <div className="mt-1 flex justify-between text-xs text-muted"><span>{t("tone.level.serious")}</span><span>{t("tone.level.friendly")}</span></div>
         <div className="mt-2 flex justify-between px-1" aria-hidden>
@@ -107,7 +110,7 @@ export function ToneForm({ initial, hoursSaved = true }: { initial: ToneInitial;
                   {x.q}
                 </div>
                 <div className="max-w-[85%] whitespace-pre-line rounded-2xl rounded-bl-sm bg-brand px-3 py-2 text-on-brand">
-                  <span className="mb-0.5 block text-xs opacity-80">{name || "Asistente"}</span>
+                  <span className="mb-0.5 block text-xs opacity-80">{name || (uiLocale === "en" ? "Assistant" : "Asistente")}</span>
                   {x.a}
                 </div>
               </div>

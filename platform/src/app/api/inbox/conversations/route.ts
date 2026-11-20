@@ -2,7 +2,8 @@ import { z } from "zod";
 import { withSession, json } from "@/lib/channels/api";
 import { getData } from "@/lib/data";
 import { withPreviews } from "@/lib/channels/repo";
-import type { ConversationStatus } from "@/lib/types";
+import { loadInboxCounts } from "@/app/(app)/inbox/counts";
+import { isDemoConversation, isUrgent } from "@/app/(app)/inbox/kinds";
 
 const Query = z.object({
   channel: z.enum(["telegram", "whatsapp", "instagram", "messenger", "simulator"]).optional(),
@@ -20,10 +21,12 @@ export async function GET(req: Request) {
     const { channel, status, q } = parsed.data;
     // Simulator (test) conversations only show when explicitly filtered; they never count as real customers.
     const data = getData();
-    const convs = (await data.conversations.list(s.tenantId, { channel, status, search: q?.trim() || undefined, limit: 200 }))
-      .filter((c) => channel === "simulator" || c.channel !== "simulator");
-    const counts: Record<ConversationStatus, number> = { bot: 0, needs_human: 0, human: 0, resolved: 0 };
-    for (const c of await data.conversations.list(s.tenantId, { limit: 5000 })) if (c.channel !== "simulator") counts[c.status] += 1;
-    return json({ conversations: await withPreviews(s.tenantId, convs), counts });
+    const [rows, { counts, urgent }] = await Promise.all([
+      data.conversations.list(s.tenantId, { channel, status, search: q?.trim() || undefined, limit: 200 }),
+      loadInboxCounts(s.tenantId), // same loader as the dashboard and the sidebar badge
+    ]);
+    const convs = rows.filter((c) => channel === "simulator" || c.channel !== "simulator");
+    const items = (await withPreviews(s.tenantId, convs)).map((c) => ({ ...c, urgent: isUrgent(c), demo: isDemoConversation(c) }));
+    return json({ conversations: items, counts, urgent });
   });
 }

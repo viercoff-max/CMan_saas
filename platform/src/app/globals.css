@@ -120,6 +120,28 @@ h1, h2 { font-family: var(--heading-font); }
 [data-brand] .focus\:border-brand:focus, [data-brand] .focus-visible\:border-brand:focus-visible { border-color: var(--focus-ring); }
 
 :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* Range slider drawn from theme tokens (REVIEW-qa-2 P2-19): filled part = --brand, rest = --line, whatever the tenant
+   colour is. A bare `accent-color` lets the browser pick a near-black unfilled track for light brands (amber).
+   Set `--pct` (0%..100%) inline. The 44px input height keeps a large hit area. */
+.range-brand { -webkit-appearance: none; appearance: none; height: 44px; background: transparent; cursor: pointer; }
+.range-brand::-webkit-slider-runnable-track {
+  height: 8px; border-radius: 9999px;
+  background: linear-gradient(to right, var(--brand) 0 var(--pct, 50%), var(--line) var(--pct, 50%) 100%);
+}
+.range-brand::-moz-range-track { height: 8px; border-radius: 9999px; background: var(--line); }
+.range-brand::-moz-range-progress { height: 8px; border-radius: 9999px; background: var(--brand); }
+.range-brand::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 24px; height: 24px; margin-top: -8px; border-radius: 9999px;
+  background: var(--brand); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--muted);
+}
+.range-brand::-moz-range-thumb {
+  width: 24px; height: 24px; border-radius: 9999px; background: var(--brand); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--muted);
+}
+
+/* Context page: keep focused / scrolled-to controls clear of the fixed save bar (REVIEW-qa-2 P2-17). */
+.scroll-clear-bar { scroll-padding-bottom: 6rem; }
+.scroll-clear-bar input, .scroll-clear-bar textarea, .scroll-clear-bar button, .scroll-clear-bar label { scroll-margin-bottom: 6rem; }
 /* iOS zooms into inputs under 16px; keep form controls at 16px on phones. */
 @media (max-width: 767px) {
   input, select, textarea { font-size: 16px !important; }
