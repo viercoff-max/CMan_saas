@@ -12,6 +12,9 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // agentRules is left at its default on purpose: with `agentRules: false`, `next dev` removes the managed block
+  // and would delete platform/AGENTS.md (it contains only that block, and CLAUDE.md imports it). If `next dev`
+  // rewrites the block, commit the change (see the note inside AGENTS.md).
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

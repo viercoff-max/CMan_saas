@@ -177,31 +177,59 @@ Wave 2 flow: `uploadLogo` -> `getData().brand.save(tenantId, {logoPath: r.path})
 Tests: `src/lib/storage/__tests__/storage.test.ts` (one FileStore contract for both backends incl. cross-tenant negatives,
 bucket rules on the fake, logos, Supabase-mode outbox and the full upload -> index -> delete flow on the fake project).
 
-## AI provider (wave 2B: 2026-11-19)
+## AI provider (wave 2B: 2026-11-19; wave 4: official SDK, spend guards)
 - `src/lib/engine/llm.ts`. Provider per call (`selectProvider`): **Anthropic** when `ANTHROPIC_API_KEY` is set (model
-  `ANTHROPIC_MODEL`, default `claude-haiku-4-5`); OpenAI (legacy) only when there is no Anthropic key, or
+  `ANTHROPIC_MODEL`, default `claude-haiku-5-5`); OpenAI (legacy, plain fetch) only when there is no Anthropic key, or
   `AI_PROVIDER=openai` with `OPENAI_API_KEY`; otherwise the deterministic offline fallback (extractive answer or `[HANDOFF]`).
-  Plain `fetch` to `POST https://api.anthropic.com/v1/messages`, `anthropic-version: 2026-10-21` (the SDK is not a
-  dependency). Body: `{model, max_tokens: 400, system: [stable rules block with cache_control ephemeral, sources block],
-  messages: [{role: "user", content}]}`; no temperature (rejected on 2026-10-21); `thinking: disabled` only for Haiku 5.x.
+- Anthropic goes through the official TypeScript SDK `@anthropic-ai/sdk` (1.x, which sends API version `2026-10-21`):
+  one `new Anthropic({ apiKey, timeout: 10_000, maxRetries: 1, logLevel: "off" })` per key (`anthropicClient`), then
+  `client.messages.create(params)`. The client is injectable (`anthropicLLM(key, model, { client })`) so tests mock the
+  SDK, never the network. Retries (429 / 5xx / 529 / connection errors, honouring `retry-after`) and timeouts are the
+  SDK's own (client options); 4xx are not retried.
+- Params (`anthropicParams`): `{model, max_tokens, system: [stable block (+cache_control ephemeral), sources block],
+  messages: [{role: "user", content}], output_config: {effort: "low"}}`. Model rules from the claude-api skill:
+  Haiku 5.5 runs adaptive thinking when `thinking` is omitted; the skill says to use effort as the lever (not
+  `thinking: disabled`), `low` being the cheapest level for chat / simple high-volume routes, and to leave room for
+  thinking in `max_tokens` (1024 for the 5.x family, 400 for models without default thinking). No temperature / top_p /
+  top_k (400 on 2026-10-21 and on Haiku 5.5), no assistant prefill, no `fallbacks` (Haiku 5.5 has no server-side
+  fallback). `output_config.effort` is only sent to models that accept it (it 400s on Haiku 4.5).
+- Response (`parseAnthropicMessage`): text blocks joined by type (a reply can start with `thinking` blocks); usage =
+  `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`. `stop_reason: "refusal"` ->
+  `[HANDOFF]` (usage kept); `stop_reason: "max_tokens"` -> deterministic answer (never a truncated reply; usage kept).
+  Typed SDK errors (`APIConnectionTimeoutError`, `APIConnectionError`, `RateLimitError`, `AuthenticationError`,
+  `BadRequestError`, `InternalServerError`, `APIError`) -> offline fallback (not metered); logs carry the class /
+  status only (never prompt, reply, key or the SDK error message).
 - Interface: `LLM = (req) => Promise<LLMResult | string>`, `LLMResult = {text, usage: {inputTokens, outputTokens,
   cacheReadTokens?, cacheWriteTokens?}, model}` (a bare string, used by test fakes, means unknown usage).
-- Errors: 15 s overall deadline, ONE retry on 429 / 5xx / 529 overloaded / network error (honours `retry-after`, max 3 s);
-  4xx are not retried. Any failure -> offline fallback (not metered). `stop_reason: "refusal"` -> `[HANDOFF]`. Logs carry
-  status codes / error class only (never prompt, reply or key).
 - Prompt caching: `buildSystemPromptParts()` (prompt.ts) splits the system prompt into the per-tenant stable part (rules,
-  tone, dos/don'ts, escalation rules) and the per-question `<sources>`; the breakpoint sits on the stable part. NOTE: Haiku
-  4.5 only caches prefixes >= 4096 tokens, so with today's ~700-1,000-token rules nothing is cached yet (no error, no
-  extra cost); it starts paying off with long brand rules or on models with a 512-1024-token minimum (e.g. Haiku 5.5).
+  tone, dos/don'ts, escalation rules) and the per-question `<sources>`. The breakpoint sits on the stable part only when
+  its estimated size reaches the model's minimum cacheable prefix (`minCacheableTokens`: 512 on Haiku 5.5, 4,096 on
+  Haiku 4.5, 1,024 default); a shorter prefix gets no breakpoint (it would not cache anyway).
 - Guardrails unchanged and still in front of / behind the call: deterministic escalations, injection hardening, PII
-  redaction (`redactPII` / `redactForLLM`: emails, phones, order/tracking numbers never reach the provider), the
-  `[HANDOFF]` token and `validateReply` (promos, URLs, invented numbers, action claims, prompt leak).
-- Metering + cap (`src/lib/engine/usage.ts`, `EngineDeps.usage` injectable): before the call `usage.remaining(tenantId)`;
-  `<= 0` (or unreadable: fail closed) -> the paid LLM is NOT called, the offline fallback answers, and when it has no
-  answer the conversation goes to a person with `escalation_reason = "ai_cap_reached"` (meta `intent: "ai_cap_reached"`,
-  `aiCap: true`). One audit event per tenant per UTC day: action `ai.cap_reached`, actor `engine`, detail `day=YYYY-MM-DD`.
-  After every provider call: `usage.record(tenantId, {requests: 1, inputTokens: input + cache read + cache write,
-  outputTokens})`, best effort (a failure is logged, the reply still goes out). Simulator conversations are metered and
-  capped too (they call the same paid model).
-- Tests: `src/lib/engine/__tests__/anthropic-integration.test.ts` (fetch mocked: request shape, no PII in the body,
-  parsing incl. usage, retries/timeouts, provider selection, cap, per-tenant metering incl. cross-tenant negatives).
+  redaction (`redactPII` / `redactForLLM`: emails, phones, order/tracking numbers never reach the provider; tested on
+  the SDK request params), the `[HANDOFF]` token and `validateReply` (promos, URLs, invented numbers, action claims,
+  prompt leak).
+- Metering + caps (`usage.ts`, `spend.ts`, `EngineDeps.usage` injectable). Before a paid call the engine reads
+  `usage.remaining(tenantId)` and reserves the call's upper bound (`estimateCallTokens` = prompt chars / 3.5 +
+  max_tokens) with `reserveSpend()`:
+  - tenant: `remaining - in-flight reservations of this tenant >= estimate` (so parallel calls cannot overshoot by more
+    than what other instances have in flight); otherwise no paid call, offline answer or handoff with
+    `escalation_reason = "ai_cap_reached"` (meta `intent: "ai_cap_reached"`, `aiCap: true`) and one audit event per
+    tenant per UTC day (`ai.cap_reached`, actor `engine`, detail `day=YYYY-MM-DD`). Unreadable budget: fail closed.
+  - platform: `PLATFORM_DAILY_TOKEN_CAP` tokens per UTC day across ALL tenants (default 5,000,000; `0` = no paid call).
+    There is no cross-tenant daily usage query (ai_usage is monthly per tenant), so the total is kept in-process (exact
+    used + in-flight) and in the shared `rate_limits` table (key `engine-ai-day:YYYY-MM-DD`, units of 1,000 tokens,
+    `ceil(estimate / 1000)` units taken before each call and never refunded: conservative, works across instances).
+    Over the cap: no paid call, offline answer or handoff with reason `no_answer` (meta `intent: "ai_platform_cap"`),
+    one `console.warn` per day per process. Counter errors fail closed.
+  After every provider call the reservation is settled with the real usage and `usage.record(tenantId, {requests: 1,
+  inputTokens: input + cache read + cache write, outputTokens})` runs (best effort). Simulator conversations are metered
+  and capped too.
+- Simulator abuse limits (`limiter.ts#recordSimulatorMessage`): 30 messages per (tenant, simulator user) and 60 per
+  tenant per 10 minutes in `rate_limits` (HMAC-keyed, not tied to the conversation, so DELETE /api/inbox/simulate does
+  not reset them); over the limit the engine sends the calm throttle message once, then stays silent, without any LLM
+  call. The per-conversation inbound throttle (20 / 10 min) still applies to every channel.
+- Tests: `src/lib/engine/__tests__/anthropic-integration.test.ts` (injected fake SDK client and the real SDK over a
+  mocked fetch: params, no PII in the params, parsing incl. usage, refusal / max_tokens, typed errors, retries, provider
+  selection, tenant cap, reservation, platform daily cap, per-tenant metering incl. cross-tenant negatives) and
+  `wave4-copy-limits.test.ts` (simulator limits across restarts, cross-tenant negative, bot copy).

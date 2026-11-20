@@ -46,26 +46,27 @@ export function attachmentReceived(lang: Lang, tone: Tone, kind: MediaKind): str
     const what = kind === "image" ? "photo" : kind === "audio" ? "voice message" : kind === "video" ? "video" : kind === "document" ? "file" : "message";
     return [
       `We have received your ${what}, thank you. A member of our team will review it.`,
-      `We received your ${what}, thanks. A person on our team will review it.`,
-      `Got your ${what}, thanks! 🙌 A person on our team will review it.`,
+      `We received your ${what}, thanks. Someone on our team will review it.`,
+      `Got your ${what}, thanks! 🙌 Someone on our team will review it.`,
     ][r];
   }
-  const es: Record<MediaKind, [string, string]> = {
-    // [usted, tú]
-    image: ["su foto", "tu foto"],
-    audio: ["su nota de voz", "tu nota de voz"],
-    video: ["su video", "tu video"],
-    document: ["su archivo", "tu archivo"],
-    sticker: ["su mensaje", "tu mensaje"],
-    location: ["su ubicación", "tu ubicación"],
-    contact: ["su mensaje", "tu mensaje"],
-    share: ["su mensaje", "tu mensaje"],
-    other: ["su archivo", "tu archivo"],
+  // [usted, tú, object pronoun agreeing with the noun: la foto / la nota de voz / la ubicación, lo el video...]
+  const es: Record<MediaKind, [string, string, "la" | "lo"]> = {
+    image: ["su foto", "tu foto", "la"],
+    audio: ["su nota de voz", "tu nota de voz", "la"],
+    video: ["su video", "tu video", "lo"],
+    document: ["su archivo", "tu archivo", "lo"],
+    sticker: ["su mensaje", "tu mensaje", "lo"],
+    location: ["su ubicación", "tu ubicación", "la"],
+    contact: ["su mensaje", "tu mensaje", "lo"],
+    share: ["su mensaje", "tu mensaje", "lo"],
+    other: ["su archivo", "tu archivo", "lo"],
   };
-  const [usted, tu] = es[kind];
+  const [usted, tu, pron] = es[kind];
+  // "Alguien de nuestro equipo" (not "una persona"): the handoff line that follows already says "una persona ...".
   return [
-    `Recibimos ${usted}, gracias. Una persona de nuestro equipo lo va a revisar.`,
-    `Recibimos ${tu}, gracias. Una persona lo va a revisar.`,
-    `¡Recibimos ${tu}, gracias! 🙌 Una persona lo va a revisar.`,
+    `Recibimos ${usted}, gracias. Alguien de nuestro equipo ${pron} va a revisar.`,
+    `Recibimos ${tu}, gracias. Alguien de nuestro equipo ${pron} va a revisar.`,
+    `¡Recibimos ${tu}, gracias! 🙌 Alguien de nuestro equipo ${pron} va a revisar.`,
   ][r];
 }

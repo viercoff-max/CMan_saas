@@ -49,10 +49,10 @@ describe("scenario 2: order status through the Shopify demo add-on", () => {
 
     expect(r3.escalated).toBe(false);
     expect(r3.text).toMatch(/#1001/);
-    expect(r3.text).toMatch(/Enviado/);
+    expect(r3.text).toMatch(/ya va en camino/);
     expect(r3.text).toMatch(/Paquetería: Estafeta/);
     expect(r3.text).toMatch(/EST123456789/);
-    expect(r3.text).toMatch(/Entrega estimada: 2026-10-12/);
+    expect(r3.text).toMatch(/12 de octubre/);
     expect(r3.text).not.toMatch(LEAK);
     expect(r3.text).not.toContain(MOCK_EMAIL);
 
@@ -77,7 +77,7 @@ describe("scenario 2: order status through the Shopify demo add-on", () => {
     const b = await handleInbound(ev("5215500001004", "pedido #9999 correo test@example.com"), { llm });
     expect(a.text).toMatch(/No encontramos un pedido con esos datos/);
     expect(b.text).toBe(a.text);
-    expect(a.text).not.toMatch(/Enviado|Estafeta|EST1/);
+    expect(a.text).not.toMatch(/Enviado|en camino|Estafeta|EST1/);
   });
 
   it("3 failures -> lockout, escalation 'attempts', outbox notified, then silent; correct data no longer checked", async () => {
@@ -119,7 +119,7 @@ describe("scenario 2: order status through the Shopify demo add-on", () => {
     expect(r1.escalated).toBe(false);
     expect(r1.text).toMatch(/No encontramos/);
     const r2 = await handleInbound(ev(attacker2, "pedido #1001 correo test@example.com"), { llm });
-    expect(r2.text).toMatch(/Enviado/); // order status disclosed after 4 failed guesses on the same order
+    expect(r2.text).toMatch(/ya va en camino/); // order status disclosed after 4 failed guesses on the same order
     expect(lookup).toHaveBeenCalledTimes(5);
     lookup.mockRestore();
   });

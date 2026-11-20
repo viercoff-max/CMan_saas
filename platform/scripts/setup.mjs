@@ -8,6 +8,9 @@ if (fs.existsSync(file)) {
   console.log(".env.local already exists, leaving it untouched.");
   const env = fs.readFileSync(file, "utf8");
   if (/^META_APP_SECRET=\s*$/m.test(env)) console.warn("WARNING: META_APP_SECRET is empty. Set it before connecting real Meta channels.");
+  // Only names are checked (values are never printed). Older files predate these settings: add them by hand.
+  const missing = ["ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "PLATFORM_DAILY_TOKEN_CAP", "DATA_BACKEND"].filter((k) => !new RegExp(`^${k}=`, "m").test(env));
+  if (missing.length) console.warn(`NOTE: .env.local has no ${missing.join(", ")} line(s). See .env.example (empty values use the defaults).`);
   if (/OneDrive|Dropbox|Google Drive/i.test(process.cwd()) && !/^DATA_DIR=\S+/m.test(env))
     console.warn("WARNING: this folder is synced to the cloud and DATA_DIR is not set. Customer data would sync too. See docs/RUNBOOK.md.");
   process.exit(0);
@@ -24,10 +27,26 @@ PUBLIC_URL=http://localhost:3000
 # Data folder (database, uploads, outbox). Empty = ./data. Production: a non-synced folder, e.g. C:\\ProgramData\\SocialInbox\\data
 DATA_DIR=
 
+# Data backend: empty/"sqlite" (local file under DATA_DIR) or "supabase" (fill the Supabase lines below and apply
+# supabase/migrations first). The secret key and DB URL are server-only: never NEXT_PUBLIC_*.
+DATA_BACKEND=
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
+SUPABASE_DB_URL=
+
 # Retention for npm run purge (days; minimum 30)
 RETENTION_DAYS=90
 
-# AI (leave empty to use the built-in offline fallback replies)
+# AI: Claude via the Anthropic API (leave the key empty to use the built-in offline fallback replies).
+# ANTHROPIC_MODEL empty = claude-haiku-5-5. Set a spend limit in the Anthropic console.
+ANTHROPIC_API_KEY=
+ANTHROPIC_MODEL=
+# Optional: "anthropic" | "openai" (only to force OpenAI while both keys are set).
+AI_PROVIDER=
+# Max AI tokens per UTC day across all tenants. Empty = 5000000; 0 = no paid AI calls.
+PLATFORM_DAILY_TOKEN_CAP=
+# Legacy AI provider, used only when ANTHROPIC_API_KEY is empty.
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4.1-mini
 

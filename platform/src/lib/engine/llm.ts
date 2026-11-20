@@ -1,9 +1,10 @@
 // LLM adapter. Provider order (resolved per call by defaultLLM()):
-//   1. Anthropic Messages API (ANTHROPIC_API_KEY; model ANTHROPIC_MODEL, default claude-haiku-4-5) - the default.
-//   2. OpenAI Chat Completions (OPENAI_API_KEY, OPENAI_MODEL) - legacy, only when no Anthropic key (or AI_PROVIDER=openai).
+//   1. Anthropic Messages API through the official SDK (@anthropic-ai/sdk). ANTHROPIC_API_KEY; model ANTHROPIC_MODEL,
+//      default claude-haiku-5-5. The default provider.
+//   2. OpenAI Chat Completions (OPENAI_API_KEY, OPENAI_MODEL): legacy, only when no Anthropic key (or AI_PROVIDER=openai).
 //   3. Deterministic offline fallback (no key, or the API failed): extractive answer from the best chunk, else [HANDOFF].
-// Plain fetch (the official @anthropic-ai/sdk is not a dependency of this project). Never logs prompts, replies or keys:
-// status codes / error classes only.
+// Never logs prompts, replies or keys: status codes / error classes only (the SDK's own logger is turned off).
+import Anthropic from "@anthropic-ai/sdk";
 import type { Chunk } from "../types";
 import type { Lang } from "./lang";
 import { HANDOFF_TOKEN } from "./prompt";
@@ -26,13 +27,22 @@ export interface LLMResult { text: string; usage: LLMUsage; model: string }
 export type LLM = (req: LLMRequest) => Promise<LLMResult | string>;
 
 export const OFFLINE_MODEL = "offline";
-export const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5";
+/** Current Haiku (claude-api skill, model table). Override with ANTHROPIC_MODEL. */
+export const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-5-5";
 export const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
-export const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-export const ANTHROPIC_VERSION = "2026-10-21";
-/** Replies are capped at ~700 chars (validate.ts MAX_REPLY_CHARS) ~ 200-250 tokens; leave headroom. */
+/**
+ * Output cap for models WITHOUT thinking (Haiku 4.5, OpenAI). Replies are capped at ~700 chars (validate.ts
+ * MAX_REPLY_CHARS) ~ 200-250 tokens; leave headroom.
+ */
 export const MAX_OUTPUT_TOKENS = 400;
-export const LLM_TIMEOUT_MS = 15_000;
+/**
+ * Output cap for models whose adaptive thinking is on by default (Haiku 5.5 and the 5.x family): thinking counts
+ * toward max_tokens, so leave room for it plus the short answer (skill: "short-output route ... max_tokens 1024").
+ */
+export const MAX_OUTPUT_TOKENS_THINKING = 1024;
+/** Per-attempt timeout (SDK `timeout`, ms) and retries (SDK `maxRetries`): worst case ~2 x 10 s plus SDK backoff. */
+export const LLM_TIMEOUT_MS = 10_000;
+export const LLM_MAX_RETRIES = 1;
 const zero = (): LLMUsage => ({ inputTokens: 0, outputTokens: 0 });
 
 export function normalizeLLMResult(out: LLMResult | string): LLMResult {
@@ -64,20 +74,140 @@ export function offlineAnswer(req: Pick<LLMRequest, "question" | "sources">): st
 export const offlineLLM = async (req: LLMRequest): Promise<LLMResult> =>
   ({ text: offlineAnswer(req), usage: zero(), model: OFFLINE_MODEL });
 
-// ---------------- shared HTTP helper (deadline + one retry) ----------------
+// ---------------- model rules (claude-api skill) ----------------
+/** Models that run adaptive thinking when `thinking` is omitted (Haiku 5.5, Sonnet/Opus 5.x, Fable, Mythos). */
+const THINKING_DEFAULT_ON = /^claude-(haiku-5|sonnet-5|opus-5|fable|mythos)/;
+/** Models that accept output_config.effort (it 400s on Haiku 4.5 / Sonnet 4.5 and older). */
+const EFFORT_MODELS = /^claude-(haiku-5|sonnet-5|opus-5|opus-4-[5-8]|sonnet-4-6|fable|mythos)/;
+
+export const maxOutputTokensFor = (model: string) => (THINKING_DEFAULT_ON.test(model) ? MAX_OUTPUT_TOKENS_THINKING : MAX_OUTPUT_TOKENS);
+
+/**
+ * Minimum cacheable prefix in tokens (skill, prompt-caching table). Shorter prefixes silently do not cache, so the
+ * breakpoint is only placed when the stable part is long enough.
+ */
+export function minCacheableTokens(model: string): number {
+  if (/^claude-(haiku-5-5|opus-5|sonnet-5-5|fable|mythos-5)/.test(model)) return 512;
+  if (/^claude-(opus-4-7|mythos-preview)/.test(model)) return 2048;
+  if (/^claude-haiku-4-5/.test(model)) return 4096;
+  return 1024; // Opus 4.8, Sonnet 5, Sonnet 4.6/4.5, Opus 4.1/4 and unknown models
+}
+
+/** Rough token estimate for budgeting / cache decisions (~3.5 chars per token; Spanish runs a bit denser). */
+export const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
+
+/** Upper bound of what one call can cost: prompt estimate + the output cap. Used to reserve budget before the call. */
+export function estimateCallTokens(req: Pick<LLMRequest, "system" | "user">, model = DEFAULT_ANTHROPIC_MODEL): number {
+  return estimateTokens(req.system) + estimateTokens(req.user) + maxOutputTokensFor(model);
+}
+
+// ---------------- Anthropic (official SDK) ----------------
+/** The slice of the SDK client the adapter uses; tests inject a fake with the same shape. */
+export interface AnthropicMessagesClient {
+  messages: { create(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> };
+}
+
+/**
+ * Messages API params (exported for tests). The stable part of the system prompt (rules, tone, brand rules: identical
+ * for every question of a tenant) carries the cache breakpoint; the per-question sources follow it, uncached.
+ * - Haiku 5.5 (default): thinking omitted (= adaptive, the skill's rule: use effort as the lever, not "disabled"),
+ *   effort "low" (skill: lowest-cost level, for chat / simple high-volume routes), max_tokens 1024 (room for thinking).
+ * - No temperature/top_p/top_k (400 on API version 2026-10-21 and on Haiku 5.5), no assistant prefill.
+ */
+export function anthropicParams(model: string, req: LLMRequest): Anthropic.MessageCreateParamsNonStreaming {
+  const stable = req.systemParts?.stable ?? req.system;
+  const cacheable = estimateTokens(stable) >= minCacheableTokens(model);
+  const breakpoint = cacheable ? { cache_control: { type: "ephemeral" as const } } : {};
+  const system: Anthropic.TextBlockParam[] = req.systemParts
+    ? [{ type: "text", text: req.systemParts.stable, ...breakpoint }, { type: "text", text: req.systemParts.dynamic }]
+    : [{ type: "text", text: req.system, ...breakpoint }];
+  return {
+    model,
+    max_tokens: maxOutputTokensFor(model),
+    system,
+    messages: [{ role: "user", content: req.user }],
+    ...(EFFORT_MODELS.test(model) ? { output_config: { effort: "low" as const } } : {}),
+  };
+}
+
+/** Maps an SDK response. Reads content blocks by type (a response can begin with thinking blocks). */
+export function parseAnthropicMessage(msg: Pick<Anthropic.Message, "content" | "stop_reason" | "usage"> & { model?: string }, requested: string): LLMResult {
+  const u = msg.usage;
+  const usage: LLMUsage = {
+    inputTokens: u?.input_tokens ?? 0, outputTokens: u?.output_tokens ?? 0,
+    cacheReadTokens: u?.cache_read_input_tokens ?? 0, cacheWriteTokens: u?.cache_creation_input_tokens ?? 0,
+  };
+  const model = msg.model || requested;
+  // A safety refusal is billed but its text must never reach the customer: hand off to a person.
+  // (Haiku 5.5 has no server-side fallback, so no `fallbacks` param is sent.)
+  if (msg.stop_reason === "refusal") return { text: HANDOFF_TOKEN, usage, model };
+  // Cut off (thinking used the cap, or a long answer): never send a truncated reply; the caller answers deterministically.
+  if (msg.stop_reason === "max_tokens") return { text: "", usage, model };
+  const text = (msg.content ?? [])
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .join("").trim();
+  return { text, usage, model };
+}
+
+/** Error class + status only (an SDK error message can echo request details). */
+function describeAnthropicError(e: unknown): string {
+  if (e instanceof Anthropic.APIConnectionTimeoutError) return "timeout";
+  if (e instanceof Anthropic.APIConnectionError) return "connection error";
+  if (e instanceof Anthropic.RateLimitError) return "status 429";
+  if (e instanceof Anthropic.AuthenticationError) return "status 401";
+  if (e instanceof Anthropic.PermissionDeniedError) return "status 403";
+  if (e instanceof Anthropic.BadRequestError) return "status 400";
+  if (e instanceof Anthropic.InternalServerError) return `status ${e.status}`;
+  if (e instanceof Anthropic.APIError) return `status ${e.status ?? "unknown"}`;
+  return e instanceof Error ? e.name : "error";
+}
+
+let cachedClient: { key: string; client: AnthropicMessagesClient } | null = null;
+/** One SDK client per API key: timeout and retries through client options; SDK logging off (no request details). */
+export function anthropicClient(apiKey: string): AnthropicMessagesClient {
+  if (cachedClient?.key !== apiKey) {
+    cachedClient = { key: apiKey, client: new Anthropic({ apiKey, timeout: LLM_TIMEOUT_MS, maxRetries: LLM_MAX_RETRIES, logLevel: "off" }) };
+  }
+  return cachedClient.client;
+}
+
+export interface AnthropicOpts { client?: AnthropicMessagesClient }
+
+export function anthropicLLM(apiKey: string, model = DEFAULT_ANTHROPIC_MODEL, o: AnthropicOpts = {}): LLM {
+  return async (req) => {
+    try {
+      const client = o.client ?? anthropicClient(apiKey);
+      const msg = await client.messages.create(anthropicParams(model, req));
+      const r = parseAnthropicMessage(msg, model);
+      // Empty / cut-off text but tokens billed: keep the usage (it is metered), answer deterministically.
+      return r.text ? r : { ...r, text: offlineAnswer(req) };
+    } catch (e) {
+      warnFallback("anthropic", describeAnthropicError(e));
+      return offlineLLM(req);
+    }
+  };
+}
+
+function warnFallback(provider: string, why: string) {
+  // Never log the request or response body (customer text) nor headers (API key). Status / error class only.
+  console.warn(`[engine] ${provider} unavailable (${why}), using offline fallback`);
+}
+
+// ---------------- OpenAI (legacy, optional; plain fetch) ----------------
 export class LLMHttpError extends Error {
   constructor(public status: number, public retryAfterMs: number | null, label: string) { super(`${label} ${status}`); this.name = "LLMHttpError"; }
 }
-/** 429 rate limit, 5xx, 529 overloaded and network errors are retried; 4xx (bad request, auth, billing) are not. */
+/** 429 rate limit, 5xx and network errors are retried; 4xx (bad request, auth, billing) are not. */
 const isRetryable = (e: unknown) =>
   e instanceof LLMHttpError ? e.status === 429 || e.status >= 500 : !(e instanceof SyntaxError);
 
 export interface HttpOpts { timeoutMs?: number; retryDelayMs?: number; sleep?: (ms: number) => Promise<void> }
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const OPENAI_TIMEOUT_MS = 15_000;
 
 /** POST JSON with an overall deadline (default 15 s) and at most ONE retry, honoring `retry-after` (capped at 3 s). */
 async function postJson(label: string, url: string, headers: Record<string, string>, body: unknown, o: HttpOpts): Promise<unknown> {
-  const deadline = Date.now() + (o.timeoutMs ?? LLM_TIMEOUT_MS);
+  const deadline = Date.now() + (o.timeoutMs ?? OPENAI_TIMEOUT_MS);
   const sleep = o.sleep ?? realSleep;
   for (let attempt = 0; ; attempt++) {
     const ctrl = new AbortController();
@@ -100,70 +230,6 @@ async function postJson(label: string, url: string, headers: Record<string, stri
   }
 }
 
-function warnFallback(provider: string, e: unknown) {
-  // Never log the request or response body (customer text) nor headers (API key). Status / error class only.
-  const why = e instanceof LLMHttpError ? `status ${e.status}` : e instanceof Error ? e.name : "error";
-  console.warn(`[engine] ${provider} unavailable (${why}), using offline fallback`);
-}
-
-// ---------------- Anthropic ----------------
-interface AnthropicResponse {
-  model?: string;
-  stop_reason?: string;
-  content?: { type: string; text?: string }[];
-  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
-}
-
-/**
- * Request body for POST /v1/messages (exported for tests). The stable part of the system prompt (rules, tone, brand
- * rules: identical for every question of a tenant) carries the cache breakpoint; the per-question sources follow it.
- */
-export function anthropicBody(model: string, req: LLMRequest) {
-  const system = req.systemParts
-    ? [
-        { type: "text", text: req.systemParts.stable, cache_control: { type: "ephemeral" } },
-        { type: "text", text: req.systemParts.dynamic },
-      ]
-    : [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }];
-  return {
-    model,
-    max_tokens: MAX_OUTPUT_TOKENS,
-    system,
-    messages: [{ role: "user", content: req.user }],
-    // Haiku 5.x runs adaptive thinking by default; short support replies do not need it (it would eat max_tokens).
-    ...(/^claude-haiku-5/.test(model) ? { thinking: { type: "disabled" } } : {}),
-  };
-}
-
-export function parseAnthropic(data: unknown, requested: string): LLMResult {
-  const d = (data ?? {}) as AnthropicResponse;
-  const u = d.usage ?? {};
-  const usage: LLMUsage = {
-    inputTokens: u.input_tokens ?? 0, outputTokens: u.output_tokens ?? 0,
-    cacheReadTokens: u.cache_read_input_tokens ?? 0, cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
-  };
-  const model = d.model || requested;
-  // A safety refusal is billed but its text must never reach the customer: hand off to a person.
-  if (d.stop_reason === "refusal") return { text: HANDOFF_TOKEN, usage, model };
-  const text = (d.content ?? []).filter((b) => b.type === "text" && typeof b.text === "string").map((b) => b.text).join("").trim();
-  return { text, usage, model };
-}
-
-export function anthropicLLM(apiKey: string, model = DEFAULT_ANTHROPIC_MODEL, o: HttpOpts = {}): LLM {
-  return async (req) => {
-    try {
-      const data = await postJson("anthropic", ANTHROPIC_URL, { "x-api-key": apiKey, "anthropic-version": ANTHROPIC_VERSION }, anthropicBody(model, req), o);
-      const r = parseAnthropic(data, model);
-      // Empty text but tokens billed: keep the usage (it is metered), answer deterministically.
-      return r.text ? r : { ...r, text: offlineAnswer(req) };
-    } catch (e) {
-      warnFallback("anthropic", e);
-      return offlineLLM(req);
-    }
-  };
-}
-
-// ---------------- OpenAI (legacy, optional) ----------------
 interface OpenAiResponse {
   model?: string;
   choices?: { message?: { content?: string } }[];
@@ -184,7 +250,7 @@ export function openAiLLM(apiKey: string, model = DEFAULT_OPENAI_MODEL, o: HttpO
       const text = data?.choices?.[0]?.message?.content?.trim() ?? "";
       return { text: text || offlineAnswer(req), usage, model: data?.model || model };
     } catch (e) {
-      warnFallback("openai", e);
+      warnFallback("openai", e instanceof LLMHttpError ? `status ${e.status}` : e instanceof Error ? e.name : "error");
       return offlineLLM(req);
     }
   };
@@ -209,10 +275,10 @@ export function selectProvider(env: Record<string, string | undefined> = process
   return { provider: "offline", key: "", model: OFFLINE_MODEL };
 }
 
-/** Resolved at call time so env changes (tests, setup) are honored. */
-export function defaultLLM(): LLM {
+/** Resolved at call time so env changes (tests, setup) are honored. The model is exposed for budget estimates. */
+export function defaultLLM(): LLM & { model?: string } {
   const s = selectProvider();
-  if (s.provider === "anthropic") return anthropicLLM(s.key, s.model);
-  if (s.provider === "openai") return openAiLLM(s.key, s.model);
+  if (s.provider === "anthropic") return Object.assign(anthropicLLM(s.key, s.model), { model: s.model });
+  if (s.provider === "openai") return Object.assign(openAiLLM(s.key, s.model), { model: s.model });
   return offlineLLM;
 }

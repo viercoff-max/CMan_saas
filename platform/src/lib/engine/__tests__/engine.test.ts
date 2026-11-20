@@ -176,7 +176,7 @@ describe("order flow", () => {
     expect(r2.text).toMatch(/correo/);
     const r3 = await handleInbound(ev("juan.perez@gmail.com"), deps);
     expect(calls).toEqual([{ n: "1234", e: "juan.perez@gmail.com" }]);
-    expect(r3.text).toMatch(/Enviado/);
+    expect(r3.text).toMatch(/Tu pedido #1234 ya va en camino\./); // "Enviado" as a phrase, not "está: Enviado"
     expect(r3.text).toMatch(/Estafeta/);
     expect(r3.text).toMatch(/EST123456/);
     expect(r3.text).toMatch(/8 de octubre/);
@@ -192,7 +192,7 @@ describe("order flow", () => {
     const { c } = fakeConnector(ok);
     const { deps } = makeDeps({ getOrdersConnector: () => c });
     const r = await handleInbound(ev("Where is my order #1234? email Juan.Perez@gmail.com"), deps);
-    expect(r.text).toMatch(/status/i);
+    expect(r.text).toMatch(/Your order #1234 is on its way\./);
     expect(r.text).toMatch(/Carrier: Estafeta/);
   });
 

@@ -1,6 +1,7 @@
 // Per-tenant AI metering and monthly cap (tokens = input + output, tenants.aiMonthlyTokenCap, see data/types.ts UsageRepo).
-// - Before an LLM call: hasBudget() -> usage.remaining(tenantId) > 0. Errors fail CLOSED (the engine then answers with the
-//   free deterministic fallback, so the customer still gets a reply).
+// - Before an LLM call: readBudget() -> usage.remaining(tenantId); the engine then reserves the call's upper-bound
+//   estimate against it and against the platform daily cap (spend.ts). Errors fail CLOSED (the engine then answers
+//   with the free deterministic fallback, so the customer still gets a reply).
 // - After an LLM call: recordUsage() -> usage.record(tenantId, {requests: 1, inputTokens, outputTokens}). Best effort:
 //   a metering failure is logged (error class only) and never breaks the reply.
 // - Cap reached: noteCapReached() writes ONE audit event per tenant per UTC day ("ai.cap_reached", detail "day=YYYY-MM-DD").
@@ -32,14 +33,29 @@ export const dataUsageMeter: UsageMeter = {
 
 const errName = (e: unknown) => (e instanceof Error ? e.name : "error");
 
-/** true when the tenant has tokens left this month. Fails closed (false) when the budget cannot be read. */
-export async function hasBudget(meter: UsageMeter, tenantId: string, now: Date): Promise<{ ok: boolean; error?: boolean }> {
+/** Tokens the tenant has left this month. Fails closed (remaining 0, error) when the budget cannot be read. */
+export async function readBudget(meter: UsageMeter, tenantId: string, now: Date): Promise<{ remaining: number; error?: boolean }> {
   try {
-    return { ok: (await meter.remaining(tenantId, now)) > 0 };
+    return { remaining: Math.max(0, Number(await meter.remaining(tenantId, now)) || 0) };
   } catch (e) {
     console.error("[engine] usage.remaining failed:", errName(e));
-    return { ok: false, error: true };
+    return { remaining: 0, error: true };
   }
+}
+
+/** true when the tenant has tokens left this month. Fails closed (false) when the budget cannot be read. */
+export async function hasBudget(meter: UsageMeter, tenantId: string, now: Date): Promise<{ ok: boolean; error?: boolean }> {
+  const b = await readBudget(meter, tenantId, now);
+  return b.error ? { ok: false, error: true } : { ok: b.remaining > 0 };
+}
+
+// Platform breaker: one log line per UTC day per process (no tenant data in it).
+let platformCapLoggedFor = "";
+export function notePlatformCapReached(now: Date): void {
+  const day = now.toISOString().slice(0, 10);
+  if (platformCapLoggedFor === day) return;
+  platformCapLoggedFor = day;
+  console.warn(`[engine] platform daily AI token cap reached (day=${day}): paid LLM calls paused until 00:00 UTC`);
 }
 
 /** Meter one LLM call for THIS tenant. The offline fallback costs nothing and is not metered. Never throws. */

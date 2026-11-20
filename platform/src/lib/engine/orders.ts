@@ -77,6 +77,8 @@ export interface OrderFlowInput {
   tenantId: string; text: string; lang: Lang; tone: T.Tone; state: OrderState;
   connector: OrdersConnector | null; noConnectorTold: boolean;
   limiter?: LookupLimiter;
+  /** Clock for date wording (delivery dates); defaults to now. */
+  now?: Date;
 }
 
 /**
@@ -122,7 +124,7 @@ export async function runOrderFlow(i: OrderFlowInput): Promise<OrderOutcome> {
   }
   if (!st.email) {
     st.stage = "ask_email";
-    return { kind: "reply", text: T.askEmail(i.lang, i.tone), intent: "order_ask_email", state: st };
+    return { kind: "reply", text: T.askEmail(i.lang, i.tone, st.number), intent: "order_ask_email", state: st };
   }
 
   const number = st.number, mail = st.email;
@@ -162,7 +164,7 @@ export async function runOrderFlow(i: OrderFlowInput): Promise<OrderOutcome> {
       text: T.orderFound(i.lang, i.tone, {
         orderNumber: number, statusText: res.statusText, carrier: res.carrier,
         trackingNumber: res.trackingNumber, trackingUrl: res.trackingUrl, estimatedDelivery: res.estimatedDelivery,
-      }),
+      }, i.now),
     };
   }
   await i.limiter?.recordFailure(number, mail);

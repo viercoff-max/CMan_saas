@@ -198,7 +198,7 @@ describe("non-text messages", () => {
     const { deps, llmCalls, notify } = makeDeps();
     const r = await handleInbound(ev("[Foto]", { media: "image" }), deps);
     expect(r).toMatchObject({ escalated: true, reason: "human_request" });
-    expect(r.text).toMatch(/Recibimos tu foto, gracias\. Una persona lo va a revisar\./);
+    expect(r.text).toMatch(/Recibimos tu foto, gracias\. Alguien de nuestro equipo la va a revisar\./); // la foto (QA-2 #8)
     expect(llmCalls).toHaveLength(0);
     const c = (await getData().conversations.get(tenantId, (await conv()).id))!;
     expect(c.status).toBe("needs_human");

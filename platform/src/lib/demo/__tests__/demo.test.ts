@@ -65,8 +65,8 @@ describe("demo seed", () => {
     expect(all.some((m) => m.body.startsWith("[Foto]"))).toBe(true);
     expect(all.some((m) => m.sender === "agent")).toBe(true);
     expect(all.some((m) => m.body.includes("mi licuadora echó humo"))).toBe(true);
-    expect(all.some((m) => /#1001/.test(m.body) && /Enviado/.test(m.body))).toBe(true);
-    expect(all.some((m) => /#1003/.test(m.body) && /Entregado/.test(m.body))).toBe(true);
+    expect(all.some((m) => /#1001/.test(m.body) && /ya va en camino/.test(m.body))).toBe(true);
+    expect(all.some((m) => /#1003/.test(m.body) && /entregado/i.test(m.body))).toBe(true);
     // emails are masked in stored bodies
     expect(all.some((m) => m.body.includes("test@example.com"))).toBe(false);
     expect(all.some((m) => m.body.includes("t***@example.com"))).toBe(true);

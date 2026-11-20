@@ -65,17 +65,46 @@ export const askOrderNumber = (lang: Lang, t: Tone) => pick(lang, t,
    "Sure thing! What's your order number? (for example, #1234)",
    "You got it! 📦 Let's see where your order is. What's your order number? (for example, #1234)"]);
 
-export const askEmail = (lang: Lang, t: Tone) => pick(lang, t,
-  ["Gracias. Para verificar, ¿me podría indicar el correo electrónico con el que realizó la compra?",
-   "Gracias. ¿Con qué correo electrónico realizó la compra, por favor?",
-   "Gracias. Para verificar, ¿me compartes el correo electrónico con el que hiciste la compra?",
-   "¡Perfecto! Para verificar, ¿me pasas el correo con el que hiciste tu compra?",
-   "¡Súper! 🙌 Para verificar, ¿con qué correo hiciste tu compra?"],
-  ["Thank you. To verify, could you please provide the email address used for the purchase?",
-   "Thank you. Which email address did you use for the purchase, please?",
-   "Thanks. To verify, what's the email address you used for the purchase?",
-   "Great! To verify, what email did you use for your purchase?",
-   "Awesome! 🙌 To verify, which email did you use for your purchase?"]);
+const hashNum = (n: string) => (n.startsWith("#") ? n : `#${n}`);
+
+/** Asks for the purchase email; names the order when known ("Para revisar tu pedido #1001, ..."). */
+export function askEmail(lang: Lang, t: Tone, orderNumber?: string): string {
+  const n = orderNumber?.trim() ? hashNum(orderNumber.trim()) : "";
+  const es = (usted: boolean) => (n ? (usted ? `Para revisar su pedido ${n}` : `Para revisar tu pedido ${n}`) : "Para verificar");
+  const en = n ? `To check your order ${n}` : "To verify";
+  return pick(lang, t,
+    [`Gracias. ${es(true)}, ¿me podría indicar el correo electrónico con el que realizó la compra?`,
+     `Gracias. ${es(true)}, ¿con qué correo electrónico realizó la compra, por favor?`,
+     `Gracias. ${es(false)}, ¿me compartes el correo electrónico con el que hiciste la compra?`,
+     `¡Perfecto! ${es(false)}, ¿me pasas el correo con el que hiciste tu compra?`,
+     `¡Súper! 🙌 ${es(false)}, ¿con qué correo hiciste tu compra?`],
+    [`Thank you. ${en}, could you please provide the email address used for the purchase?`,
+     `Thank you. ${en}, which email address did you use for the purchase, please?`,
+     `Thanks. ${en}, what's the email address you used for the purchase?`,
+     `Great! ${en}, what email did you use for your purchase?`,
+     `Awesome! 🙌 ${en}, which email did you use for your purchase?`]);
+}
+
+/**
+ * Leading interjections of the templates above ("¡Perfecto!", "Gracias.", "¡Claro!"...). When the engine prefixes the
+ * first reply with a hello ("¡Hola! Soy Chef."), it drops them so the reply never has two openers.
+ */
+const OPENERS = [
+  "¡Claro que sí! 📦", "¡Claro que sí! 😊", "¡Claro que sí!", "¡Súper! 🙌", "¡Gracias! 🙌", "¡Perfecto!", "¡Gracias!", "¡Claro!",
+  "¡Listo!", "¡Va!", "¡Sin problema! 😊", "Gracias.", "Listo.", "Entendido.", "De acuerdo.", "Por supuesto.", "Con gusto.",
+  "You got it! 📦", "Awesome! 🙌", "Thanks! 🙌", "Absolutely! 😊", "No worries at all! 😊", "Sure thing!", "All set!", "Great!",
+  "Thanks!", "Thanks.", "Thank you.", "Happy to help.", "Of course!", "Certainly.", "Understood.", "Very well.", "Okay.", "No problem!",
+];
+export function stripOpener(text: string): string {
+  const s = text.trimStart();
+  for (const o of OPENERS) {
+    if (s.startsWith(o) && /^\s+\S/.test(s.slice(o.length))) {
+      const rest = s.slice(o.length).trimStart();
+      return rest.charAt(0).toLocaleUpperCase() + rest.slice(1);
+    }
+  }
+  return text;
+}
 
 export const askNumberHaveEmail = (lang: Lang, t: Tone) => pick(lang, t,
   ["Gracias. ¿Me podría indicar también su número de pedido? (por ejemplo, #1234)",
@@ -91,36 +120,85 @@ export const askNumberHaveEmail = (lang: Lang, t: Tone) => pick(lang, t,
 
 export interface OrderStatusView { orderNumber: string; statusText?: string; carrier?: string; trackingNumber?: string; trackingUrl?: string; estimatedDelivery?: string }
 
-/** STATUS ONLY: status, carrier, tracking, ETA. Never address, items, phone, payment or the email. */
-export function orderFound(lang: Lang, t: Tone, o: OrderStatusView): string {
-  const num = o.orderNumber.startsWith("#") ? o.orderNumber : `#${o.orderNumber}`;
-  const status = o.statusText?.trim() || (lang === "es" ? "en proceso" : "processing");
+/**
+ * Connector status texts (Spanish, see shopify/mapping.ts; English also accepted) -> a predicate that reads well after
+ * "Tu pedido #1001 ..." in each language. `good` statuses get the "buenas noticias" opener at the warm tones.
+ */
+const STATUS_PHRASES: Record<string, { es: string; en: string; good: boolean }> = {
+  enviado: { es: "ya va en camino", en: "is on its way", good: true },
+  "enviado parcialmente": { es: "ya va en camino, en parte (una parte ya se envió)", en: "is partly on its way (part of it has shipped)", good: true },
+  entregado: { es: "ya fue entregado", en: "has been delivered", good: true },
+  "en preparacion": { es: "está en preparación", en: "is being prepared", good: true },
+  "en proceso": { es: "está en proceso", en: "is being processed", good: true },
+  "en espera": { es: "está en espera", en: "is on hold", good: false },
+  "pago pendiente": { es: "tiene el pago pendiente", en: "is waiting for payment", good: false },
+  "pago no completado": { es: "tiene un pago que no se completó", en: "has a payment that was not completed", good: false },
+  reembolsado: { es: "fue reembolsado", en: "has been refunded", good: false },
+  cancelado: { es: "fue cancelado", en: "has been cancelled", good: false },
+};
+const STATUS_ALIASES: Record<string, string> = {
+  shipped: "enviado", "in transit": "enviado", "partially shipped": "enviado parcialmente", delivered: "entregado",
+  preparing: "en preparacion", processing: "en proceso", "on hold": "en espera", "payment pending": "pago pendiente",
+  refunded: "reembolsado", cancelled: "cancelado", canceled: "cancelado", cancelada: "cancelado", entregada: "entregado", enviada: "enviado",
+};
+const foldStatus = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[.\s]+$/g, "").replace(/\s+/g, " ");
+
+/** "Tu pedido #1001 ya va en camino" style predicate; null for a status we do not know (caller quotes it). */
+export function orderStatusPhrase(lang: Lang, statusText?: string): { phrase: string; good: boolean } | null {
+  const k = foldStatus(statusText || "en proceso");
+  const e = STATUS_PHRASES[STATUS_ALIASES[k] ?? k];
+  return e ? { phrase: lang === "es" ? e.es : e.en, good: e.good } : null;
+}
+
+/** "2026-10-12" -> "12 de octubre" (es-MX) / "October 12" (en-US); the year is added when it is not `now`'s year. */
+export function formatDeliveryDate(lang: Lang, value: string, now: Date = new Date()): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+  if (!m) return value.trim();
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  if (Number.isNaN(d.getTime())) return value.trim();
+  const withYear = d.getUTCFullYear() !== now.getUTCFullYear();
+  return new Intl.DateTimeFormat(lang === "es" ? "es-MX" : "en-US", {
+    day: "numeric", month: "long", timeZone: "UTC", ...(withYear ? { year: "numeric" } : {}),
+  }).format(d);
+}
+
+/**
+ * STATUS ONLY: status, carrier, tracking, ETA. Never address, items, phone, payment or the email.
+ * Exported as the single order-status reply builder (the add-on test preview reuses it: "El asistente diría").
+ */
+export function orderFound(lang: Lang, t: Tone, o: OrderStatusView, now: Date = new Date()): string {
+  const num = hashNum(o.orderNumber);
+  const known = orderStatusPhrase(lang, o.statusText);
+  const quoted = (o.statusText ?? "").trim().replace(/[.\s]+$/, "");
   const lines: string[] = [];
   if (lang === "es") {
+    const su = (s: string) => (known ? `${s} ${num} ${known.phrase}.` : `El estatus de ${s.toLowerCase()} ${num} es «${quoted}».`);
     lines.push(p5(t, [
-      `Le informamos que el estatus de su pedido ${num} es: ${status}.`,
-      `El estatus de su pedido ${num} es: ${status}.`,
-      `El estatus de tu pedido ${num} es: ${status}.`,
-      `¡Listo! Tu pedido ${num} está: ${status}.`,
-      `¡Buenas noticias! 🚚 Tu pedido ${num} está: ${status}.`,
+      `Le informamos que ${su("su pedido").replace(/^El/, "el")}`,
+      su("Su pedido"),
+      su("Tu pedido"),
+      known?.good === false ? `Ya lo revisé: ${su("tu pedido")}` : `¡Listo! ${su("Tu pedido")}`,
+      known?.good === false ? `Ya lo revisé 👀 ${su("Tu pedido")}` : `¡Buenas noticias! 🚚 ${su("Tu pedido")}`,
     ]));
     if (o.carrier) lines.push(`Paquetería: ${o.carrier}.`);
     if (o.trackingNumber) lines.push(`Número de guía: ${o.trackingNumber}.`);
     if (o.trackingUrl) lines.push(`Rastreo: ${o.trackingUrl}`);
-    if (o.estimatedDelivery) lines.push(`Entrega estimada: ${o.estimatedDelivery}.`);
+    if (o.estimatedDelivery) lines.push(`Entrega estimada: ${formatDeliveryDate("es", o.estimatedDelivery, now)}.`);
     if (t >= 4) lines.push(t === 5 ? "¿Te ayudo con algo más? 😊" : "¿Te ayudo con algo más?");
   } else {
+    const yours = known ? `your order ${num} ${known.phrase}.` : `the status of your order ${num} is “${quoted}”.`;
+    const cap = yours.charAt(0).toUpperCase() + yours.slice(1);
     lines.push(p5(t, [
-      `We are pleased to inform you that the status of your order ${num} is: ${status}.`,
-      `The status of your order ${num} is: ${status}.`,
-      `Your order ${num} status is: ${status}.`,
-      `All set! Your order ${num} is: ${status}.`,
-      `Good news! 🚚 Your order ${num} is: ${status}.`,
+      `We are pleased to inform you that ${yours}`,
+      `We checked: ${yours}`,
+      cap,
+      known?.good === false ? `I checked: ${yours}` : `All set! ${cap}`,
+      known?.good === false ? `Checked it 👀 ${cap}` : `Good news! 🚚 ${cap}`,
     ]));
     if (o.carrier) lines.push(`Carrier: ${o.carrier}.`);
     if (o.trackingNumber) lines.push(`Tracking number: ${o.trackingNumber}.`);
     if (o.trackingUrl) lines.push(`Track it here: ${o.trackingUrl}`);
-    if (o.estimatedDelivery) lines.push(`Estimated delivery: ${o.estimatedDelivery}.`);
+    if (o.estimatedDelivery) lines.push(`Estimated delivery: ${formatDeliveryDate("en", o.estimatedDelivery, now)}.`);
     if (t >= 4) lines.push(t === 5 ? "Can I help with anything else? 😊" : "Can I help with anything else?");
   }
   return lines.join("\n");

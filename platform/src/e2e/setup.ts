@@ -19,6 +19,11 @@ process.env.META_APP_SECRET = "e2e-meta-app-secret";
 process.env.META_VERIFY_TOKEN = "e2e-verify-token";
 process.env.PUBLIC_URL = "https://inbox.test";
 delete process.env.OPENAI_API_KEY;
+// A developer shell with a real Anthropic key must never make e2e call the API (or pick a non-default provider / cap).
+delete process.env.ANTHROPIC_API_KEY;
+delete process.env.ANTHROPIC_MODEL;
+delete process.env.AI_PROVIDER;
+delete process.env.PLATFORM_DAILY_TOKEN_CAP;
 
 // Never let the outbox land in the real project folder.
 vi.spyOn(process, "cwd").mockReturnValue(FAKE_CWD);

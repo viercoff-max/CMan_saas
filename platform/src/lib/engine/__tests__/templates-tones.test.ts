@@ -43,7 +43,7 @@ describe("five distinct tone registers", () => {
   it("tones 1-2 use usted, 3-5 use tu (es)", () => {
     expect(T.askEmail("es", 2)).toMatch(/realizó/);
     expect(T.askEmail("es", 3)).toMatch(/hiciste/);
-    expect(T.orderFound("es", 2, { orderNumber: "1" })).toMatch(/su pedido/);
+    expect(T.orderFound("es", 2, { orderNumber: "1" })).toMatch(/su pedido/i);
     expect(T.orderFound("es", 4, { orderNumber: "1" })).toMatch(/tu pedido/i);
   });
   it("safety text never has emoji and keeps formal/informal families", () => {

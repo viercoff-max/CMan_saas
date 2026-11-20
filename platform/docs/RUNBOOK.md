@@ -30,9 +30,9 @@ To start it automatically when Windows boots, create a scheduled task "At startu
 
 The admin panel is used from this computer only: open `http://localhost:3000`. Do not open it through the public tunnel address.
 
-## 3. The public tunnel: expose only two paths
+## 3. The public tunnel: expose only the webhook paths
 
-Meta and Shopify must reach us from the Internet; nothing else should. With Cloudflare Tunnel (`cloudflared`), use a config like this (`config.yml`):
+Meta, Telegram and Shopify must reach us from the Internet; nothing else should. With Cloudflare Tunnel (`cloudflared`), use a config like this (`config.yml`):
 
 ```yaml
 tunnel: <your-tunnel-id>
@@ -42,10 +42,21 @@ ingress:
     path: ^/api/webhooks/meta(/.*)?$        # Meta messages + Meta data-deletion callback
     service: http://127.0.0.1:3000
   - hostname: inbox.yourdomain.com
+    path: ^/api/webhooks/telegram/[A-Za-z0-9-]+$   # Telegram bots (one random webhook id per bot; only if you use Telegram)
+    service: http://127.0.0.1:3000
+  - hostname: inbox.yourdomain.com
     path: ^/api/shopify/callback$            # Shopify one-button connect (only if you use it)
     service: http://127.0.0.1:3000
-  - service: http_status:404                 # everything else (login, inbox, settings) is NOT public
+  # Brand logos (/api/brand-assets/<tenant>/logo-<uuid>.<ext>) are NOT needed here: the panel is used on localhost
+  # and in Supabase mode logos come from the Supabase bucket. Add this rule only if something outside this computer
+  # must load a logo (for example an e-mail template):
+  # - hostname: inbox.yourdomain.com
+  #   path: ^/api/brand-assets/[A-Za-z0-9][A-Za-z0-9_-]{0,63}/logo-[0-9a-f-]{36}\.(png|jpg|webp)$
+  #   service: http://127.0.0.1:3000
+  - service: http_status:404                 # everything else (login, inbox, settings, simulator) is NOT public
 ```
+
+The Telegram path has no signature of its own: the random webhook id in the URL plus Telegram's secret-token header are what protect it, so never post that URL anywhere.
 
 Set `PUBLIC_URL=https://inbox.yourdomain.com` in `.env.local`. Because it starts with `https://`, the login cookie is marked Secure.
 
@@ -86,7 +97,8 @@ After 5 wrong passwords for one email (or 10 from one network address) in 15 min
 
 - [ ] Everything moved out of OneDrive, folder access restricted, BitLocker on, secrets rotated (section 1).
 - [ ] Running with `npm run build` + `npm start` (section 2), never `npm run dev`.
-- [ ] Tunnel exposes only `/api/webhooks/meta…` and `/api/shopify/callback` (section 3).
+- [ ] Tunnel exposes only `/api/webhooks/meta…`, `/api/webhooks/telegram/<id>` (if used) and `/api/shopify/callback` (section 3).
+- [ ] AI: `ANTHROPIC_API_KEY` from a dedicated production workspace with a **console spend limit**; `PLATFORM_DAILY_TOKEN_CAP` set (default 5,000,000 tokens/day across all tenants; section 9).
 - [ ] `META_APP_SECRET` set (unsigned webhooks are rejected).
 - [ ] Nightly `npm run purge` and `npm run backup` scheduled; one restore tested.
 - [ ] **Meta App Review** approved for the messaging permissions (`pages_messaging`, `instagram_manage_messages`, `whatsapp_business_messaging` if used), with Business Verification.
@@ -96,3 +108,12 @@ After 5 wrong passwords for one email (or 10 from one network address) in 15 min
 - [ ] **DPA with OpenAI** signed (and zero data retention requested if available); contract (encargo) between Chefman and Momentia signed.
 - [ ] Shopify: Protected Customer Data access approved; compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) wired.
 - [ ] A named person checks the human-handoff queue during business hours.
+
+## 9. AI provider and spend limits
+
+- Provider: Claude through the official Anthropic SDK when `ANTHROPIC_API_KEY` is set (model `ANTHROPIC_MODEL`, empty = `claude-haiku-5-5`). Without a key the bot uses the free offline replies. The key is server-only; rotate it if it ever leaves `.env.local` / the host's encrypted env.
+- Three limits stop runaway cost, cheapest first. When one is hit the paid call is skipped: the bot answers with the offline reply, or hands the chat to a person.
+  1. **Per tenant, per month**: `tenants.ai_monthly_token_cap` (default 2,000,000). Each call reserves its maximum size first, so parallel messages cannot overshoot much. Audit `ai.cap_reached` once per tenant per day.
+  2. **Whole platform, per UTC day**: `PLATFORM_DAILY_TOKEN_CAP` (default 5,000,000; `0` = no paid AI at all). The log shows `platform daily AI token cap reached` once per day per server process. It resets at 00:00 UTC. To resume earlier, raise the value and restart.
+  3. **Anthropic console spend limit** on the workspace: the last line of defence. Set it.
+- Simulator ("Probar"): at most 30 messages per user and 60 per brand every 10 minutes; "Empezar de nuevo" does not reset this.

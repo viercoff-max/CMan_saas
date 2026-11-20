@@ -56,6 +56,26 @@ export async function recordLookupFailure(tenantId: string, orderNumber: string,
   );
 }
 
+/**
+ * Simulator limits (security review 2, M3): per (tenant, simulator user) and per tenant, in getData().rateLimits
+ * (global HMAC-keyed counters). They are NOT tied to the conversation, so "Empezar de nuevo" (DELETE, which removes
+ * the conversation and its engine_inbound_log rows) does not reset them. The simulator externalId is `sim-<userId>`.
+ */
+export const SIM_WINDOW_MS = 10 * 60 * 1000;
+export const SIM_MAX_PER_USER = 30;
+export const SIM_MAX_PER_TENANT = 60;
+
+/** Counts one simulator message; false when the user or the tenant is over its limit for the window. */
+export async function recordSimulatorMessage(tenantId: string, externalId: string, now: number): Promise<boolean> {
+  const rl = getData().rateLimits;
+  const k = (purpose: string, v: string) => `${purpose}:${createHmac("sha256", secret()).update(`${purpose}|${v}`).digest("hex").slice(0, 32)}`;
+  const [user, tenant] = await Promise.all([
+    rl.hit(k("engine-sim-user", `${tenantId}|${externalId}`), SIM_MAX_PER_USER, SIM_WINDOW_MS, now),
+    rl.hit(k("engine-sim-tenant", tenantId), SIM_MAX_PER_TENANT, SIM_WINDOW_MS, now),
+  ]);
+  return user.ok && tenant.ok;
+}
+
 /** Logs one inbound message for the conversation and returns how many arrived within the window (including this one). */
 export async function recordInbound(tenantId: string, conversationId: string, now: number): Promise<number> {
   return getData().limiter.recordInbound(tenantId, conversationId, now, now - RETENTION_MS, now - INBOUND_WINDOW_MS);

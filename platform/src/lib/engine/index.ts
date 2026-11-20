@@ -8,15 +8,16 @@ import { getOrdersConnector as defaultGetOrdersConnector } from "../connectors/r
 import { notifyHandoff as defaultNotifyHandoff } from "../channels/handoff";
 import { detectActionRequest, detectEscalation, formatBusinessHours, isOpenNow, parseBusinessHours, type EscalationReason } from "./escalate";
 import { detectLanguage, type Lang } from "./lang";
-import { defaultLLM, normalizeLLMResult, offlineLLM, type LLM, type LLMRequest, type LLMResult } from "./llm";
+import { defaultLLM, estimateCallTokens, normalizeLLMResult, offlineLLM, totalInputTokens, type LLM, type LLMRequest, type LLMResult } from "./llm";
+import { releaseReservation, reserveSpend, type Reservation } from "./spend";
 import { runOrderFlow, type LookupLimiter, type OrderState } from "./orders";
 import { buildSystemPromptParts, buildUserMessage, HANDOFF_TOKEN } from "./prompt";
-import { AI_CAP_REASON, dataUsageMeter, hasBudget, noteCapReached, recordUsage, type UsageMeter } from "./usage";
+import { AI_CAP_REASON, dataUsageMeter, noteCapReached, notePlatformCapReached, readBudget, recordUsage, type UsageMeter } from "./usage";
 import { isProductChunk, retrieve, type Retrieved } from "./retrieve";
 import * as T from "./templates";
 import * as C from "./copy";
 import { attachmentReceived, parseMediaText, type MediaKind } from "./media";
-import { INBOUND_WINDOW_MS, isLookupBlocked, MAX_INBOUND_PER_WINDOW, recordInbound, recordLookupFailure } from "./limiter";
+import { INBOUND_WINDOW_MS, isLookupBlocked, MAX_INBOUND_PER_WINDOW, recordInbound, recordLookupFailure, recordSimulatorMessage } from "./limiter";
 import { isAffirmative, isComplaint, isGreetingOnly, isNegative, looksLikeInjection, maskEmailsInText, redactForLLM, redactPII } from "./text";
 import { validateReply } from "./validate";
 import { isLegacyDefault } from "../context/settings";
@@ -111,10 +112,12 @@ export async function handleInbound(ev: EngineInboundEvent, deps: EngineDeps = {
   const ctx: Ctx = { tenantId, conv, settings, tone: T.clampTone(settings.toneLevel), lang, state, text, now: d.now(), deps: d, media };
 
   // Per-conversation inbound throttle (caps LLM cost / queue flooding): one calm message, then silence.
+  // Simulator: also per (tenant, user) and per tenant, keyed outside the conversation so a restart does not reset it.
   try {
     const nowMs = ctx.now.getTime();
     const recent = await recordInbound(tenantId, conv.id, nowMs);
-    if (recent > MAX_INBOUND_PER_WINDOW) {
+    const simOk = ev.channel !== "simulator" || await recordSimulatorMessage(tenantId, ev.externalId, nowMs);
+    if (recent > MAX_INBOUND_PER_WINDOW || !simOk) {
       if (state.throttledAt && nowMs - state.throttledAt < INBOUND_WINDOW_MS) return { text: "", escalated: false, reason: "throttled" };
       state.throttledAt = nowMs;
       const body = C.throttled(lang, ctx.tone);
@@ -176,7 +179,7 @@ async function pipeline(ctx: Ctx): Promise<EngineReply> {
   const flow = await runOrderFlow({
     tenantId: ctx.tenantId, text, lang: ctx.lang, tone: ctx.tone, state: state.order ?? {},
     connector: await ctx.deps.getOrdersConnector(ctx.tenantId), noConnectorTold: !!state.noConnectorTold,
-    limiter: lookupLimiter(ctx),
+    limiter: lookupLimiter(ctx), now: ctx.now,
   });
   state.order = flow.state;
   if (flow.kind === "escalate") return escalate(ctx, flow.reason, flow.handoff, { intent: flow.intent });
@@ -266,22 +269,40 @@ async function knowledgeAnswer(ctx: Ctx, injection: boolean): Promise<EngineRepl
     system: `${parts.stable}\n${parts.sources}`, systemParts: { stable: parts.stable, dynamic: parts.sources },
     user, question, sources, lang: ctx.lang,
   };
-  // Monthly AI cap (per tenant, simulator included): with no budget left the paid LLM is NOT called; the free
-  // deterministic fallback answers, or the conversation goes to a person with reason "ai_cap_reached".
-  const budget = await hasBudget(ctx.deps.usage, tenantId, ctx.now);
+  // Monthly AI cap (per tenant, simulator included) + platform daily breaker (spend.ts): the call's upper-bound
+  // estimate is reserved BEFORE the call. Without budget the paid LLM is NOT called; the free deterministic fallback
+  // answers, or the conversation goes to a person ("ai_cap_reached" for the tenant cap, "no_answer" for the platform).
+  const budget = await readBudget(ctx.deps.usage, tenantId, ctx.now);
+  const paid = ctx.deps.llm !== offlineLLM;
+  let block: "tenant" | "platform" | "error" | null = budget.error ? "error" : budget.remaining <= 0 ? "tenant" : null;
+  let reservation: Reservation | null = null;
+  if (!block && paid) {
+    const need = estimateCallTokens(req, (ctx.deps.llm as { model?: string }).model);
+    const r = await reserveSpend(tenantId, need, budget.remaining, ctx.now);
+    if (r.ok) reservation = r.reservation;
+    else block = r.reason === "tenant_cap" ? "tenant" : r.reason === "platform_cap" ? "platform" : "error";
+  }
   let out: LLMResult;
-  if (budget.ok) {
-    out = normalizeLLMResult(await ctx.deps.llm(req));
+  if (!block) {
+    let used = 0;
+    try {
+      out = normalizeLLMResult(await ctx.deps.llm(req));
+      used = totalInputTokens(out.usage) + (out.usage.outputTokens || 0);
+    } finally {
+      if (reservation) releaseReservation(reservation, used); // a throw releases it as unused; the pipeline hands off
+    }
     await recordUsage(ctx.deps.usage, tenantId, out, ctx.now);
   } else {
-    if (!budget.error) await noteCapReached(ctx.deps.usage, tenantId, ctx.now);
+    if (block === "tenant") await noteCapReached(ctx.deps.usage, tenantId, ctx.now);
+    if (block === "platform") notePlatformCapReached(ctx.now);
     out = await offlineLLM(req);
   }
-  const capped = !budget.ok;
+  const capped = block !== null;
   const raw = out.text;
   const meta = { sources: sources.map((c) => c.id), injection: injection || undefined, aiCap: capped || undefined };
 
   if (!raw || raw.includes(HANDOFF_TOKEN)) {
+    if (block === "platform") return escalate(ctx, "no_answer", "no_answer", { intent: "ai_platform_cap", ...meta });
     return capped
       ? escalate(ctx, AI_CAP_REASON, "no_answer", { intent: "ai_cap_reached", ...meta })
       : escalate(ctx, "no_answer", "no_answer", { intent: "llm_handoff", ...meta });
@@ -332,7 +353,8 @@ async function finish(ctx: Ctx, body: string, meta: Record<string, unknown>, opt
     const hello = custom && ctx.lang === ctx.settings.languageDefault
       ? (custom.split(/(?<=[.!])\s+/)[0] ?? custom)
       : T.shortHello(ctx.lang, ctx.tone, ctx.settings.agentName);
-    text = `${hello} ${text}`;
+    // One opener only: "¡Hola! Soy Chef. Para revisar tu pedido #1001, ..." (never "¡Hola! Soy Chef. ¡Perfecto! ...").
+    text = `${hello} ${T.stripOpener(text)}`;
   }
   state.greeted = true;
   state.botTurns = (state.botTurns ?? 0) + 1;
