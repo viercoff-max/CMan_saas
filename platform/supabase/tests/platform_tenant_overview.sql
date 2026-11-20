@@ -1,4 +1,4 @@
--- Tests for public.platform_tenant_overview (migration 20261120090000_platform_tenant_overview.sql).
+-- Tests for public.platform_tenant_overview (migration 20261120002400_platform_tenant_overview.sql).
 -- Run as postgres (SQL editor / MCP execute_sql) AFTER the migration is applied. The DO block always ends by raising,
 -- so every fixture is rolled back. Success message: "PLATFORM_OVERVIEW_TESTS_PASSED (n checks)".
 do $$

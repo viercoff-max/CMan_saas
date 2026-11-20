@@ -321,7 +321,7 @@ const held = (c: Row) => {
 const requireTenant = (a: Row) => { if (!a.p_tenant || !UUID.test(String(a.p_tenant))) throw new Fail(err("22004", "tenant_required")); return String(a.p_tenant); };
 
 const RPCS: Record<string, (db: FakeSupabase, a: Row) => unknown> = {
-  // Mirrors 20261120090000_platform_tenant_overview.sql (CROSS-TENANT, service_role only).
+  // Mirrors 20261120002400_platform_tenant_overview.sql (CROSS-TENANT, service_role only).
   platform_tenant_overview(db, a) {
     const period = String(a.p_period ?? "");
     if (!/^\d{4}-\d{2}-01$/.test(period)) throw new Fail(err("22023", "invalid_period"));

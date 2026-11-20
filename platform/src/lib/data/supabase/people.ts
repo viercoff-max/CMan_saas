@@ -17,7 +17,7 @@ export function tenantsRepo(db: Db): TenantsRepo {
       return r ? mapTenant(r) : null;
     },
     // CROSS-TENANT by design (platform-admin screen; the caller checked platformAdmins first). One RPC computes the
-    // page and its counts in SQL (migration 20261120090000_platform_tenant_overview.sql, service_role only).
+    // page and its counts in SQL (migration 20261120002400_platform_tenant_overview.sql, service_role only).
     async listAll(q = {}) {
       const { limit, offset, search } = tenantListArgs(q);
       const period = usagePeriod(q.now ?? new Date());

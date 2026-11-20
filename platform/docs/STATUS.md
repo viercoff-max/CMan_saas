@@ -140,7 +140,72 @@ Stage 3 (2026-11-19). Code: `src/lib/auth.ts`, `src/lib/auth/`, `src/proxy.ts`, 
   `channels.findByWebhookId` (Telegram routing), global audit rows. Telegram secret helpers in `lib/channels/telegram-secret.ts`.
 - **Auth**: /team shows real names and emails in Supabase mode (server-side directory after the membership check);
   audit rows for Supabase sign-in, invitations, role changes and removals; `ensureSeed` is a no-op in Supabase mode.
-- **Migration written, NOT applied**: `supabase/migrations/20261120090000_platform_tenant_overview.sql` (RPC
+- **Migration written, NOT applied**: `supabase/migrations/20261120002400_platform_tenant_overview.sql` (RPC
   `platform_tenant_overview`, service_role only) + test `supabase/tests/platform_tenant_overview.sql`. Apply it before
   using `tenants.listAll` against Supabase.
 - Interface for wave 2: docs/ARCHITECTURE.md "Wave 1 additions" and "Storage".
+
+## Platform admin & public site (wave 2D, 2026-11-19)
+Code: `src/app/(platform)/`, `src/app/(marketing)/`, `src/lib/platform/` (the old `src/app/page.tsx` redirect was
+removed: `/` is now `(marketing)/page.tsx`). Test: `src/lib/platform/__tests__/platform.test.ts` (offline, mocked auth/data).
+- **Platform identity in ONE file**: `src/lib/platform/brand.ts` (`PLATFORM_BRAND`: "Conversa", marked "nombre
+  provisional", dark teal colours, privacy contact e-mail and legal entity, both `null` = "por definir" on the pages).
+  These areas set the platform colours inline, so tenant branding never applies to them.
+- **`/platform`** (platform owners only, reached by URL, no link anywhere): server-side `getAuthState` ->
+  `platformAdmins.isPlatformAdmin(userId)` in BOTH the layout and the page (`requirePlatformAdmin`, memoised per
+  request). Anyone else (anonymous, tenant owners/admins/agents, errors) gets a plain 404; `tenants.listAll` is only
+  called after the check. Read-only table: name/slug/since, plan and status badges, "Tope de IA" badge, connected
+  channels, conversations this month, AI tokens vs monthly cap (bar, 80% amber, 100% red), team size. Search (`?q=`),
+  paging (`?page=`, 25 per page), KPIs (registered total; conversations and "need attention" for the current page),
+  counts only (no messages or end-customer data). ES/EN toggle and sign-out in its own header.
+  Audit: global row `platform.view` at most once per admin per one-hour window (shared rate-limit table, so it holds
+  across instances; fixed window, so two rows can be ~minutes apart across an hour boundary).
+  Supabase: needs the `platform_tenant_overview` migration applied and a row in `public.platform_admins`; SQLite:
+  `PLATFORM_ADMIN_EMAILS`.
+- **Public pages** (Spanish default + English via the `locale` cookie): `/` landing (signed-in users -> `/dashboard`),
+  `/precios` (Gratis / Pro / Negocio, "Precio por definir", no checkout), `/privacidad` and `/terminos` (DRAFTS with the
+  banner "Borrador: debe revisarlo un abogado antes de publicarse": LFPDPPP basics, responsable vs encargado,
+  processors Supabase / Vercel / Anthropic / Telegram / Meta (+ OpenAI if configured), retention 90 d / 365 d mask /
+  30 d outbox / 24 h security rows, ARCO, cookies = necessary only), `/eliminar-datos` (how an end customer asks for
+  deletion, incl. the Meta callback and its status URL; also marked draft until the contact e-mail is set).
+  Copy is honest: no numbers, testimonials or logos. Content: `src/lib/platform/content.ts`.
+- **SEO**: per-page metadata (`src/lib/platform/seo.ts`). `SITE_INDEXABLE = false` in `brand.ts` sends
+  `noindex, nofollow` on every public page; `LEGAL_DRAFT = true` keeps the legal pages noindex and shows the banner.
+  `/platform` is always noindex with a generic title. No canonical URL yet (domain not decided).
+- **Before publishing**: final name, privacy contact + legal entity in `brand.ts`, lawyer review of the three legal
+  pages (then `LEGAL_DRAFT = false`), confirm processor regions/DPAs, then `SITE_INDEXABLE = true`. Give Meta
+  `/privacidad` as the privacy policy URL and `/eliminar-datos` as the data-deletion instructions URL.
+- **Not verified**: no browser click-through (the running dev server on :3000 answered 500 on every route, including
+  `/login`, with an unrelated Next internal error); covered by server-render tests only.
+
+## Branding (wave 2C, 2026-11-19)
+- **White-label theme**: `src/lib/brand/theme.ts` derives every brand token (`--brand`, `--brand-dark`, `--on-brand`,
+  `--brand-ink` for links/text, `--focus-ring`, `--brand-soft`, `--brand-accent`/`--on-brand-accent`, `--menu-bg`/
+  `--menu-ink`/`--menu-muted`/`--menu-hover`, `--heading-font`) from `brand_settings`, for light AND dark mode, with WCAG
+  math ported from `design/mockups/brands.js` (text on fills: white / near-black / black; brand-as-text darkened or
+  lightened until 4.5:1). The (app) layout computes it server side and puts `data-brand` + `--tb-*`/`--tbd-*` custom
+  properties on the shell wrapper; `globals.css` maps them (dark set under `prefers-color-scheme: dark`): no flash, no
+  client script. Platform default colours -> no `data-brand`, the hand-tuned default theme applies. Fonts: a safe list of
+  system stacks only (`system`, `serif`, `rounded`, `humanist`): `next/font/google` downloads fonts at build time, which
+  needs network, so no web fonts.
+- **Sidebar**: tenant logo + display name, grouped nav (Atención, Tu asistente, Conexiones, Tu negocio), menu colours
+  from the brand. Agents see only Inicio, Mensajes and Plan y uso.
+- **/brand** (admin only): logo (png/jpeg/webp <= 2 MB), display name, primary/accent/menu colours (picker + hex),
+  heading font, AA contrast report, live preview (panel + chat), "Restablecer", "Guardar marca". Saves through
+  `POST /brand/save` (route handler: a logo can exceed the 1 MB Server Action body limit): same-origin check, admin of
+  the ACTIVE tenant, 30 saves / 15 min per tenant, `lib/brand/save.ts` (uploadLogo -> brand.save -> removeLogo(old) ->
+  audit `brand.save` with the changed field names only). The tenant always comes from the session.
+- **Onboarding step 2 "Tu marca"** (`/onboarding?step=brand`, right after "Tu negocio"): logo + main colour, skippable
+  ("Lo hago después"), then /dashboard.
+- **/billing "Plan y uso"** (every member): plan, AI usage meter (input+output tokens vs `aiMonthlyTokenCap`, %, remaining,
+  renews on the 1st of next month UTC), conversations this month (simulator excluded), team size, plans table with
+  "Precio por definir" and no checkout.
+- **Role-aware shell**: `src/components/guards.ts` `requireAdminPage()` is the first statement of /context, /tone,
+  /sources, /addons, /brand and /team (agents -> /inbox, before any data is read). Dashboard: checklist shows only the
+  steps the role can do (agents: the simulator test), adds "Invita a tu equipo" (Supabase mode), "Ponle tu logo y tus
+  colores" (optional), counts Telegram as a channel, and an "Uso de IA del mes" KPI for every member.
+- Tests: `src/lib/brand/__tests__/{theme,save}.test.ts`, `src/components/__tests__/{contrast,guards}.test.ts`,
+  `src/app/(app)/billing/__tests__/usage.test.ts`, `src/app/(app)/dashboard/__tests__/steps.test.ts`.
+- Open: exact monthly conversation count needs a data-layer count (see docs/REQUESTS.md); plan limits (conversations,
+  seats) are not modelled yet, so the plans table lists features without numbers; the brand colours do not reach the
+  Telegram bot photo / name yet.
