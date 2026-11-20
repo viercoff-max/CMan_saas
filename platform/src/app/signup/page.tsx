@@ -50,6 +50,8 @@ export default async function SignupPage({ searchParams }: { searchParams: Promi
     if (!r.ok) redirect(withNext(`/signup?error=${r.error}`, back));
     // Backup for email templates that drop the redirect's query string (read once by /auth/confirm, same browser).
     (await cookies()).set(AUTH_NEXT_COOKIE, back, { ...baseCookieOptions(), maxAge: 60 * 60 * 24 });
+    // "Confirm email" OFF in Supabase: the session already exists, go straight in (new users land on onboarding).
+    if (r.signedIn) redirect(back);
     redirect("/signup?sent=1");
   }
 

@@ -17,7 +17,11 @@ const Name = z.string().trim().max(120);
 /** Client IP of the request (trusted proxy headers only). Omit only in tests / scripts without a request. */
 export interface AuthGuard { ip: string }
 
-export type SignUpResult = { ok: true } | { ok: false; error: "invalid" | "weak_password" | "failed" };
+/**
+ * `signedIn`: Supabase returned a session right away ("Confirm email" turned OFF in the project): the caller sends the
+ * user straight in instead of "revisa tu correo". Never set for an existing e-mail (no account enumeration).
+ */
+export type SignUpResult = { ok: true; signedIn?: true } | { ok: false; error: "invalid" | "weak_password" | "failed" };
 
 /**
  * Creates the account and sends the confirmation email (link -> /auth/confirm). "Already registered" is reported as
@@ -30,11 +34,11 @@ export async function signUp(client: SupabaseClient, input: { email: unknown; pa
   if (!Password.safeParse(input.password).success) return { ok: false, error: "weak_password" };
   if (guard && !(await authAttemptAllowed("signup", guard.ip, email.data))) return { ok: true };
   const name = Name.safeParse(input.name ?? "");
-  const { error } = await client.auth.signUp({
+  const { data, error } = await client.auth.signUp({
     email: email.data, password: String(input.password),
     options: { emailRedirectTo: confirmUrl, data: name.success && name.data ? { name: name.data } : undefined },
   });
-  if (!error) return { ok: true };
+  if (!error) return data?.session ? { ok: true, signedIn: true } : { ok: true };
   const code = (error as { code?: string }).code ?? "";
   if (code === "user_already_exists" || code === "email_exists") return { ok: true };
   if (code === "weak_password") return { ok: false, error: "weak_password" };

@@ -14,6 +14,10 @@ describe("signUp", () => {
     expect(await signUp(auth({ signUp: fn }), { email: " Ana@Example.test ", password: "0123456789", name: "Ana" }, "https://app.example/auth/confirm?next=%2Fdashboard")).toEqual({ ok: true });
     expect(fn).toHaveBeenCalledWith({ email: "ana@example.test", password: "0123456789", options: { emailRedirectTo: "https://app.example/auth/confirm?next=%2Fdashboard", data: { name: "Ana" } } });
   });
+  it("with 'Confirm email' off Supabase returns a session: reported as signedIn (the page sends the user straight in)", async () => {
+    const fn = vi.fn(async () => ({ data: { user: { id: "u1" }, session: { access_token: "t" } }, error: null }));
+    expect(await signUp(auth({ signUp: fn }), { email: "ana@example.test", password: "0123456789" }, "https://x")).toEqual({ ok: true, signedIn: true });
+  });
   it("an already-registered email looks exactly like success", async () => {
     const c = auth({ signUp: async () => ({ data: {}, error: { code: "user_already_exists", message: "User already registered" } }) });
     expect(await signUp(c, { email: "a@b.test", password: "0123456789" }, "https://x")).toEqual({ ok: true });
