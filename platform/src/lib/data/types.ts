@@ -76,6 +76,12 @@ export interface TenantsRepo {
    * returns the uuid. Callers must use the returned id. Real Supabase sign-ups use the create_tenant RPC instead.
    */
   ensure(tenantIdOrSlug: string, name: string): Promise<string>;
+  /**
+   * Deletes the tenant row; every tenant table cascades (members, settings, conversations, messages, sources, ...).
+   * Stored files are NOT removed here (callers clean the FileStore first). Only used for demo businesses, after the
+   * caller checked owner role + demo flag. Supabase only; SQLite (single-tenant on-prem) throws DataValidationError.
+   */
+  remove(tenantId: string): Promise<boolean>;
 }
 export type MemberRole = "owner" | "admin" | "agent";
 export interface Member { userId: string; tenantId: string; name: string; email: string; role: MemberRole }

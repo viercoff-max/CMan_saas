@@ -32,6 +32,12 @@ export function tenantsRepo(db: Db): TenantsRepo {
       const items = Array.isArray(r.items) ? (r.items as Record<string, unknown>[]).map(mapTenantOverview) : [];
       return { items, total: Number(r.total ?? 0), period };
     },
+    async remove(tenantId) {
+      if (!isUuid(tenantId)) return false;
+      const { data, error } = await db.from("tenants").delete().eq("id", tenantId).select("id");
+      if (error) throw new Error("tenants.remove failed");
+      return Array.isArray(data) && data.length === 1;
+    },
     async ensure(idOrSlug, name) {
       if (isUuid(idOrSlug)) {
         const r = await one(db.from("tenants").select("id").eq("id", idOrSlug).maybeSingle(), "tenants.ensure");

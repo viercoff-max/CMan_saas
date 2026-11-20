@@ -11,6 +11,7 @@ import {
   DEMO_SOURCE_PREFIX, DEMO_TENANT,
 } from "./content";
 import { buildConversations } from "./conversations";
+import type { DemoConv } from "./content";
 
 export { DEMO_TENANT, DEMO_PREFIX, DEMO_SOURCE_PREFIX, DEMO_ACTOR };
 
@@ -108,8 +109,19 @@ export async function seedDemo(tenantId: string = DEMO_TENANT, now: Date = new D
 
   // (5) conversations: written via messages.add, then timestamps adjusted
   await removeDemoConversations(tenantId);
-  let messages = 0;
   const convs = buildConversations(now);
+  const messages = await writeDemoConversations(tenantId, convs, now);
+
+  // flag row (one per tenant)
+  if ((await data.audit.find(tenantId, { actor: DEMO_ACTOR, action: FLAG })) === null)
+    await data.audit.log(tenantId, DEMO_ACTOR, FLAG, "demo data present");
+  return { conversations: convs.length, messages, sources: 2, sections: CONTEXT_SECTION_KEYS.length };
+}
+
+/** Writes demo transcripts (external_id "demo-<key>", meta.demo) with backdated timestamps. Returns messages written. */
+export async function writeDemoConversations(tenantId: string, convs: DemoConv[], now: Date): Promise<number> {
+  const data = getData();
+  let messages = 0;
   for (const c of convs) {
     const conv = await data.conversations.getOrCreate(tenantId, c.channel, `${DEMO_PREFIX}${c.key}`, c.name);
     let t = now.getTime() - c.startAgo * 60_000;
@@ -130,11 +142,7 @@ export async function seedDemo(tenantId: string = DEMO_TENANT, now: Date = new D
       unread: c.unread, createdAt: new Date(first).toISOString(), lastMessageAt: new Date(Math.min(t, now.getTime())).toISOString(),
     });
   }
-
-  // flag row (one per tenant)
-  if ((await data.audit.find(tenantId, { actor: DEMO_ACTOR, action: FLAG })) === null)
-    await data.audit.log(tenantId, DEMO_ACTOR, FLAG, "demo data present");
-  return { conversations: convs.length, messages, sources: 2, sections: CONTEXT_SECTION_KEYS.length };
+  return messages;
 }
 
 export async function resetDemo(tenantId: string = DEMO_TENANT): Promise<{ conversations: number; sources: number }> {

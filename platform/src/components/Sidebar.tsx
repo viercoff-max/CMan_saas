@@ -25,9 +25,11 @@ export function BrandMark({ name, logoUrl, size = 36 }: { name: string; logoUrl:
  * Desktop: fixed left column. Phones: a compact top bar with a "Menú" button that opens the full navigation as a
  * panel (REVIEW-qa-2 P2-29: replaces the horizontal scroll strip). Every target is at least 44px.
  */
-export function Sidebar({ tenantName, logoUrl = null, onLogout, onToggleLang, waiting = 0, role = "admin", tenants = [], activeTenantId, onSwitchTenant }: {
+export function Sidebar({ tenantName, logoUrl = null, onLogout, onToggleLang, waiting = 0, role = "admin", tenants = [], activeTenantId, onSwitchTenant, demoHref }: {
   tenantName: string; logoUrl?: string | null; waiting?: number; onLogout: () => Promise<void>; onToggleLang: () => Promise<void>;
   role?: Role; tenants?: TenantMembership[]; activeTenantId?: string; onSwitchTenant?: (form: FormData) => Promise<void>;
+  /** "+ Crear negocio demo" link (Supabase mode only). */
+  demoHref?: string;
 }) {
   const t = useT(shellDict);
   const path = usePathname();
@@ -81,6 +83,11 @@ export function Sidebar({ tenantName, logoUrl = null, onLogout, onToggleLang, wa
       </div>
       <div id="app-nav" className={`${open ? "flex" : "hidden"} flex-col md:flex md:flex-1`}>
         {switcher}
+        {demoHref && (
+          <div className="px-5 pb-2 md:pb-3">
+            <Link href={demoHref} className="inline-flex min-h-11 items-center text-sm text-menu-muted underline-offset-2 hover:text-menu-ink hover:underline">{t("nav.demo")}</Link>
+          </div>
+        )}
         <nav aria-label={t("nav.main")} className="flex flex-col gap-1 px-3 pb-3 md:flex-1">
           {navFor(role).map((g) => (
             <div key={g.key} className="mb-2 flex flex-col gap-1">

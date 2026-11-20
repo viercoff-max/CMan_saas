@@ -16,12 +16,14 @@ type Keyed<T> = Record<ContextSectionKey, T>;
 const PREVIEW = 400;
 const keyed = <T,>(f: (k: ContextSectionKey) => T): Keyed<T> => Object.fromEntries(CONTEXT_SECTION_KEYS.map((k) => [k, f(k)])) as Keyed<T>;
 
-export function ContextForm({ initial, modes: initialModes, files: initialFiles, links, sources = [] }: {
+export function ContextForm({ initial, modes: initialModes, files: initialFiles, links, sources = [], hasFullFile = false }: {
   initial: Keyed<string>;
   modes?: Keyed<Mode>;
   files?: Keyed<SectionFileInfo | null>;
   links?: Keyed<string[]>;
   sources?: SourceOption[];
+  /** A whole-business file is uploaded and indexed ("Opción rápida"): the sections become optional. */
+  hasFullFile?: boolean;
 }) {
   const t = useT(dict);
   const [values, setValues] = useState<Keyed<string>>(initial);
@@ -149,7 +151,7 @@ export function ContextForm({ initial, modes: initialModes, files: initialFiles,
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-canvas" role="progressbar" aria-valuenow={filled} aria-valuemin={0} aria-valuemax={total}>
           <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${(filled / total) * 100}%` }} />
         </div>
-        <p className="mt-2 text-xs text-muted">{t("ctx.meter.hint")}</p>
+        <p className="mt-2 text-xs text-muted">{hasFullFile ? t("ctx.meter.hintFull") : t("ctx.meter.hint")}</p>
       </Card>
 
       {CONTEXT_SECTION_KEYS.map((k) => {

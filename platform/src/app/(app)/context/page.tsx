@@ -7,6 +7,7 @@ import { CONTEXT_SECTION_KEYS, type ContextSectionKey } from "@/lib/types";
 import { getEffectiveSectionContent, PREVIEW_CHARS, sectionFileSourceIds, type SectionMode } from "@/lib/context/section-repo";
 import { getFileStore, keyFromStored } from "@/lib/storage";
 import { ContextForm, type SectionFileInfo, type SourceOption } from "./ContextForm";
+import { FullFileCard, type FullFileInfo } from "./FullFileCard";
 
 export const dynamic = "force-dynamic";
 
@@ -40,10 +41,18 @@ export default async function Page() {
   const sources: SourceOption[] = (await data.sources.list(tenantId)).filter((x) => !hidden.has(x.id))
     .map((x) => ({ id: x.id, kind: x.kind, title: x.title, url: x.url, status: x.status, error: x.error }));
 
+  // "Opción rápida": general uploaded files (not a section file, not linked to a section) = the whole-business file(s).
+  const linkedAnywhere = new Set(Object.values(links).flat());
+  const fullFiles: FullFileInfo[] = sources.filter((x) => x.kind === "file" && !linkedAnywhere.has(x.id))
+    .map((x) => ({ id: x.id, name: x.title, status: x.status, error: x.error }));
+  const hasFullFile = fullFiles.some((f) => f.status === "indexed");
+
   return (
     <>
       <PageHeader title={t("ctx.title")} subtitle={t("ctx.subtitle")} />
-      <ContextForm initial={initial} modes={modes} files={files} links={links} sources={sources} />
+      <FullFileCard files={fullFiles} />
+      <h2 className="mb-3 mt-6 text-sm font-semibold uppercase tracking-wide text-muted">{hasFullFile ? t("ctx.sectionsTitleFull") : t("ctx.sectionsTitle")}</h2>
+      <ContextForm initial={initial} modes={modes} files={files} links={links} sources={sources} hasFullFile={hasFullFile} />
     </>
   );
 }

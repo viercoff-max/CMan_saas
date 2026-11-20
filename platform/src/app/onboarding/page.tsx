@@ -1,6 +1,7 @@
 // Onboarding (Supabase mode). Step 1 "Tu negocio": signed-in users without a business land here from the app shell.
 // Step 2 "Tu marca" (?step=brand, right after creating the business): logo + main colour, skippable ("Lo hago
 // después"), then the dashboard. It saves through POST /brand/save (admin of the ACTIVE tenant, like /brand).
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getLocale, makeT, type Dict } from "@/lib/i18n";
 import { shellDict } from "@/lib/shell-dict";
@@ -72,7 +73,10 @@ export default async function OnboardingPage({ searchParams }: { searchParams: P
   return (
     <AuthCard wide eyebrow={t("onb.step")} title={t("onb.title")} subtitle={t("onb.subtitle")}>
       <OnboardingForm labels={Object.fromEntries(KEYS.map((k) => [k, t(k)]))} />
-      <form action={onboardingLogout} className="mt-4 text-center">
+      <p className="mt-4 text-center text-sm">
+        <Link href="/onboarding/demo" className="inline-flex min-h-11 items-center text-brand underline underline-offset-2">{t("onb.demo")}</Link>
+      </p>
+      <form action={onboardingLogout} className="mt-2 text-center">
         <button type="submit" className="min-h-11 text-sm text-muted underline underline-offset-2 hover:text-ink">{t("onb.logout")}</button>
       </form>
     </AuthCard>

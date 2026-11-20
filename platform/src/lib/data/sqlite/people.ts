@@ -1,5 +1,6 @@
 // Tenants, members, platform admins and the local users table (SQLite).
 import { newId } from "../../ids";
+import { DataValidationError } from "../errors";
 import { TENANT_DEFAULTS, tenantListArgs, usagePeriod } from "../rules";
 import type {
   Member, MemberRole, MembersRepo, PlatformAdminsRepo, TenantInfo, TenantOverview, TenantPlan, TenantsRepo, TenantStatus, UsersRepo,
@@ -39,6 +40,9 @@ export const tenants: TenantsRepo = {
   async ensure(tenantId, name) {
     db().prepare("INSERT OR IGNORE INTO tenants (id, name) VALUES (?, ?)").run(tenantId, name);
     return tenantId;
+  },
+  async remove() {
+    throw new DataValidationError("unsupported"); // on-prem SQLite is single-tenant: there is no demo business to delete
   },
   // CROSS-TENANT by design (platform-admin screen): the caller checked platformAdmins.isPlatformAdmin first.
   async listAll(q = {}) {

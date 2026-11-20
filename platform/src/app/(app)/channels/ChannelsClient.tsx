@@ -4,11 +4,14 @@ import { useRouter } from "next/navigation";
 import { Badge, Button, Card, ConfirmDialog, PageHeader, inputCls } from "@/components/ui";
 import { useT } from "@/lib/i18n-client";
 import { channelsDict } from "./dict";
-import { connectTelegram, disconnectChannel, disconnectTelegram, reregisterTelegramWebhook, type TelegramWebhookState } from "./actions";
+import { connectChannel, connectTelegram, disconnectChannel, disconnectTelegram, reregisterTelegramWebhook, type TelegramWebhookState } from "./actions";
 
 type Ch = "whatsapp" | "instagram" | "messenger";
 /** `available` comes from src/lib/platform/channels.ts (single source of truth with the public site and billing). */
 export interface AccountView { channel: Ch; status: "connected" | "disconnected" | "error"; name: string; available: boolean }
+
+/** WhatsApp (beta). `enabled` = the platform Meta app is wired (server-side env check); otherwise "Próximamente". */
+export interface WhatsAppView { enabled: boolean; status: "connected" | "disconnected" | "error"; name: string; canEdit: boolean }
 
 export interface TelegramView {
   status: "connected" | "disconnected" | "error"; username: string; connectedAt: string;
@@ -20,7 +23,7 @@ export interface TelegramView {
  * buttons), the same as on the public site (REVIEW-qa-2 P1-4). The platform's Meta webhook settings (verify token)
  * are platform config and are never shown to tenants (REVIEW-security-2 L7).
  */
-export function ChannelsClient({ telegram, accounts }: { telegram: TelegramView; accounts: AccountView[] }) {
+export function ChannelsClient({ telegram, accounts, whatsapp }: { telegram: TelegramView; accounts: AccountView[]; whatsapp?: WhatsAppView }) {
   const t = useT(channelsDict);
   return (
     <div>
@@ -30,7 +33,9 @@ export function ChannelsClient({ telegram, accounts }: { telegram: TelegramView;
         <section aria-labelledby="more-channels">
           <h2 id="more-channels" className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">{t("more")}</h2>
           <div className="grid gap-4">
-            {accounts.map((a) => <ChannelCard key={a.channel} a={a} />)}
+            {accounts.map((a) => a.channel === "whatsapp" && whatsapp?.enabled
+              ? <WhatsAppCard key={a.channel} v={whatsapp} />
+              : <ChannelCard key={a.channel} a={a} />)}
           </div>
           <p className="mt-4 rounded-xl bg-canvas p-3 text-sm text-muted">{t("tech.test")}</p>
         </section>
@@ -199,6 +204,83 @@ function TelegramCard({ v }: { v: TelegramView }) {
         <p className="mt-4 border-t border-line pt-4 text-sm text-muted">{t("tg.adminOnly")}</p>
       )}
       <ConfirmDialog open={confirm} title={t("tg.confirmTitle")} body={t("confirmDisconnect")} confirmLabel={t("disconnect")} cancelLabel={t("cancel")}
+        onConfirm={disconnect} onCancel={() => setConfirm(false)} />
+    </Card>
+  );
+}
+
+/**
+ * WhatsApp Cloud API (beta): Phone number ID + WhatsApp Business account ID + permanent access token. connectChannel
+ * tests them against Graph and subscribes the platform app to the account webhooks before saving (token encrypted).
+ */
+function WhatsAppCard({ v }: { v: WhatsAppView }) {
+  const t = useT(channelsDict);
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [form, setForm] = useState({ externalId: "", wabaId: "", accessToken: "" });
+  const [msg, setMsg] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+  const [confirm, setConfirm] = useState(false);
+  const ids = { id: useId(), waba: useId(), token: useId(), hint: useId() };
+  const connected = v.status === "connected";
+  const ready = form.externalId.trim() && form.wabaId.trim() && form.accessToken.trim();
+
+  function save() {
+    setMsg(null);
+    start(async () => {
+      try {
+        const r = await connectChannel("whatsapp", form);
+        if (r.ok) { setForm({ externalId: "", wabaId: "", accessToken: "" }); setMsg({ tone: "ok", text: t("saved", { name: r.name }) }); router.refresh(); }
+        else setMsg({ tone: "bad", text: t(`err.${r.error}`) });
+      } catch { setMsg({ tone: "bad", text: t("err.network") }); }
+    });
+  }
+  function disconnect() {
+    setConfirm(false);
+    start(async () => { await disconnectChannel("whatsapp"); setMsg(null); router.refresh(); });
+  }
+  const field = (key: "externalId" | "wabaId" | "accessToken", id: string, label: string, help: string, secret = false) => (
+    <div>
+      <label htmlFor={id} className="mb-1 block text-sm font-medium text-ink">{label}</label>
+      <input id={id} required type={secret ? "password" : "text"} inputMode={secret ? undefined : "numeric"} spellCheck={false}
+        autoComplete={secret ? "new-password" : "off"} aria-describedby={secret ? ids.hint : undefined}
+        className={`${inputCls} min-h-[44px] font-mono text-base md:text-sm`} value={form[key]}
+        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))} />
+      <Help text={help} />
+    </div>
+  );
+
+  return (
+    <Card className="flex flex-col">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="text-lg font-semibold">{t("c.whatsapp")}</h3>
+        <span className="flex gap-1.5">
+          <Badge tone="info">{t("wa.beta")}</Badge>
+          <Badge tone={connected ? "good" : v.status === "error" ? "bad" : "neutral"}>{t(v.status)}</Badge>
+        </span>
+      </div>
+      <p className="mt-1 text-sm text-muted">{t("d.whatsapp")}</p>
+      {connected && v.name && <p className="mt-3 rounded-xl bg-[var(--ok-bg,#ecfdf3)] p-3 text-sm text-ink">{t("connectedAs", { name: v.name })}</p>}
+      <p className="mt-3 rounded-xl bg-canvas p-3 text-sm text-muted">{t("wa.window")}</p>
+      <div role="status" aria-live="polite">
+        {msg && <p className={`mt-3 rounded-xl p-3 text-sm ${msg.tone === "ok" ? "bg-[var(--ok-bg,#ecfdf3)] text-[var(--ok,#15803d)]" : "bg-[var(--bad-bg,#fef2f2)] text-danger"}`}>{msg.text}</p>}
+      </div>
+      {v.canEdit ? (
+        <form className="mt-4 space-y-3 border-t border-line pt-4" autoComplete="off" onSubmit={(e) => { e.preventDefault(); save(); }}>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted">{connected ? t("wa.howChange") : t("wa.how")}</h4>
+          <p className="text-sm text-ink">{t("wa.intro")}</p>
+          {field("externalId", ids.id, t("f.whatsapp.id"), t("f.whatsapp.id.help"))}
+          {field("wabaId", ids.waba, t("f.whatsapp.waba"), t("f.whatsapp.waba.help"))}
+          {field("accessToken", ids.token, t("f.whatsapp.token"), t("f.whatsapp.token.help"), true)}
+          <span id={ids.hint} className="block text-xs text-muted">{`${t("tokenWarn")} ${t("f.secretHint")}`}</span>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {connected ? <Button type="button" variant="ghost" className="min-h-[44px]" onClick={() => setConfirm(true)} disabled={pending}>{t("disconnect")}</Button> : <span />}
+            <Button type="submit" className="min-h-[44px]" disabled={pending || !ready}>{pending ? t("testing") : t("save")}</Button>
+          </div>
+        </form>
+      ) : (
+        <p className="mt-4 border-t border-line pt-4 text-sm text-muted">{t("wa.adminOnly")}</p>
+      )}
+      <ConfirmDialog open={confirm} title={t("wa.confirmTitle")} body={t("confirmDisconnect")} confirmLabel={t("disconnect")} cancelLabel={t("cancel")}
         onConfirm={disconnect} onCancel={() => setConfirm(false)} />
     </Card>
   );

@@ -2,8 +2,8 @@ import { getSession, hasRole } from "@/lib/auth";
 import { getData } from "@/lib/data";
 import { maskTelegramToken, telegramWebhookReachable } from "@/lib/channels/telegram";
 import type { TelegramChannelSecrets } from "@/lib/channels/telegram-secret";
-import { isChannelAvailable } from "@/lib/platform/channels";
-import { ChannelsClient, type AccountView, type TelegramView } from "./ChannelsClient";
+import { isChannelAvailable, whatsappPlatformReady } from "@/lib/platform/channels";
+import { ChannelsClient, type AccountView, type TelegramView, type WhatsAppView } from "./ChannelsClient";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +31,13 @@ export default async function ChannelsPage() {
     canEdit: hasRole(s.role, "admin"),
   };
 
+  // WhatsApp (beta): a form only when the platform Meta app is wired (META_APP_SECRET + META_VERIFY_TOKEN).
+  const wa = await data.channels.get(s.tenantId, "whatsapp");
+  const whatsapp: WhatsAppView = {
+    enabled: whatsappPlatformReady(), status: wa.status, canEdit: hasRole(s.role, "admin"),
+    name: wa.status === "connected" ? String(wa.publicInfo.displayName ?? wa.publicInfo.externalId ?? "") : "",
+  };
+
   // The platform's Meta webhook URL and META_VERIFY_TOKEN are platform config: never rendered to tenants (L7).
-  return <ChannelsClient telegram={telegram} accounts={accounts} />;
+  return <ChannelsClient telegram={telegram} accounts={accounts} whatsapp={whatsapp} />;
 }

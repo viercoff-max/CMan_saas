@@ -5,19 +5,20 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }) }));
 vi.mock("../actions", () => ({
-  connectTelegram: vi.fn(), disconnectChannel: vi.fn(), disconnectTelegram: vi.fn(), reregisterTelegramWebhook: vi.fn(),
+  connectChannel: vi.fn(), connectTelegram: vi.fn(), disconnectChannel: vi.fn(), disconnectTelegram: vi.fn(), reregisterTelegramWebhook: vi.fn(),
 }));
 
 import { LocaleProvider } from "@/lib/i18n-client";
-import { ChannelsClient, type AccountView, type TelegramView } from "../ChannelsClient";
+import { ChannelsClient, type AccountView, type TelegramView, type WhatsAppView } from "../ChannelsClient";
+import { whatsappPlatformReady } from "@/lib/platform/channels";
 import { channelsDict } from "../dict";
 
 const tgNoBot: TelegramView = { status: "disconnected", username: "", connectedAt: "", webhook: "failed", tokenHint: "", reachable: false, canEdit: true };
 const meta = (status: AccountView["status"] = "disconnected"): AccountView[] =>
   (["whatsapp", "instagram", "messenger"] as const).map((channel) => ({ channel, status, name: status === "connected" ? "Mi página" : "", available: false }));
-const render = (telegram: TelegramView, accounts: AccountView[], locale: "es" | "en" = "es") =>
+const render = (telegram: TelegramView, accounts: AccountView[], locale: "es" | "en" = "es", whatsapp?: WhatsAppView) =>
   // children passed as the third argument (react/no-children-prop); the cast only satisfies LocaleProvider's prop type.
-  renderToStaticMarkup(createElement(LocaleProvider, { locale } as { locale: typeof locale; children: ReactNode }, createElement(ChannelsClient, { telegram, accounts })));
+  renderToStaticMarkup(createElement(LocaleProvider, { locale } as { locale: typeof locale; children: ReactNode }, createElement(ChannelsClient, { telegram, accounts, whatsapp })));
 
 describe("channels page", () => {
   it("tenant with no bot: HTTPS note does not claim a saved bot nor point at a missing button", () => {
@@ -51,5 +52,34 @@ describe("channels page", () => {
     const html = render(tgNoBot, meta("connected"));
     expect(html).toContain("Desconectar");
     expect(html).toContain("Mi página");
+  });
+
+  it("WhatsApp stays 'Próximamente' while the platform Meta app is not configured", () => {
+    const html = render(tgNoBot, meta(), "es", { enabled: false, status: "disconnected", name: "", canEdit: true });
+    expect(html).not.toContain(channelsDict.es["f.whatsapp.waba"]);
+    expect(html.match(/Conectar y probar/g)).toHaveLength(1);
+  });
+
+  it("WhatsApp (beta) asks for phone number ID, WhatsApp Business account ID and token when the platform is ready", () => {
+    const html = render(tgNoBot, meta(), "es", { enabled: true, status: "disconnected", name: "", canEdit: true });
+    for (const k of ["f.whatsapp.id", "f.whatsapp.waba", "f.whatsapp.token", "wa.beta", "wa.window"]) expect(html).toContain(channelsDict.es[k].split("«")[0].slice(0, 30));
+    expect(html.match(/Conectar y probar/g)).toHaveLength(2);
+    expect(html).toMatch(/type="password"/); // the token field is masked
+    expect(html).not.toMatch(/Token de verificación|Verify token|api\/webhooks\/meta/); // platform config never shown (L7)
+  });
+
+  it("WhatsApp: agents see the connection but no form", () => {
+    const html = render(tgNoBot, meta(), "es", { enabled: true, status: "connected", name: "Mi Tienda", canEdit: false });
+    expect(html).toContain("Mi Tienda");
+    expect(html).toContain(channelsDict.es["wa.adminOnly"]);
+    expect(html).not.toContain(channelsDict.es["f.whatsapp.waba"]);
+  });
+
+  it("whatsappPlatformReady needs both the app secret and the verify token", () => {
+    expect(whatsappPlatformReady({})).toBe(false);
+    expect(whatsappPlatformReady({ META_APP_SECRET: "x" })).toBe(false);
+    expect(whatsappPlatformReady({ META_VERIFY_TOKEN: "y" })).toBe(false);
+    expect(whatsappPlatformReady({ META_APP_SECRET: " ", META_VERIFY_TOKEN: "y" })).toBe(false);
+    expect(whatsappPlatformReady({ META_APP_SECRET: "x", META_VERIFY_TOKEN: "y" })).toBe(true);
   });
 });

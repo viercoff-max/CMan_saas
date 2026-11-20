@@ -38,3 +38,12 @@ export function listNames(chs: readonly PublicChannel[], locale: Locale): string
 export function channelChips(locale: Locale): { name: string; state: string; available: boolean }[] {
   return CHANNEL_ORDER.map((c) => ({ name: CHANNEL_NAMES[c], state: AVAILABILITY_LABEL[locale][CHANNEL_AVAILABILITY[c]], available: isChannelAvailable(c) }));
 }
+
+/**
+ * WhatsApp (beta) can be connected in /channels once the PLATFORM's Meta app is wired: META_APP_SECRET (webhook
+ * signature) and META_VERIFY_TOKEN (webhook handshake) are set. Server only (reads env). The public site keeps
+ * WhatsApp as "coming soon" until the Meta app passes review (CHANNEL_AVAILABILITY above).
+ */
+export function whatsappPlatformReady(env: Record<string, string | undefined> = process.env): boolean {
+  return !!env.META_APP_SECRET?.trim() && !!env.META_VERIFY_TOKEN?.trim();
+}
