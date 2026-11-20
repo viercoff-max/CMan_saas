@@ -26,4 +26,7 @@ defineDataStoreContract({
     process.env.PLATFORM_ADMIN_EMAILS = ` other@example.test , ${adminEmail.toUpperCase()} `;
     return { admin, other };
   },
+  async setTenantStatus(tenantId, status) {
+    getDb().prepare("UPDATE tenants SET status = ? WHERE id = ?").run(status, tenantId);
+  },
 });

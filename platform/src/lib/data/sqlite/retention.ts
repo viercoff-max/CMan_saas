@@ -1,9 +1,10 @@
 // Retention purge, per-customer lookups and the Meta deletion lookups (SQLite). Policy lives in lib/retention.
 import type { CustomerConversation, RetentionRepo } from "../types";
-import { db, tx, type Row } from "./conn";
+import { db, json, tx, type Row } from "./conn";
 
-// COALESCE everywhere: a NULL here would make "NOT hold" NULL and silently skip the row.
-const HOLD_SQL = `(COALESCE(escalation_reason, '') IN ('safety','legal')
+// COALESCE everywhere: a NULL here would make "NOT hold" NULL and silently skip the row. Same rule as Supabase's
+// app_private.is_legal_hold: the sticky legal_hold column (H1) OR the reason OR state.legalHold.
+const HOLD_SQL = `(COALESCE(legal_hold, 0) = 1 OR COALESCE(escalation_reason, '') IN ('safety','legal')
   OR COALESCE(CASE WHEN json_valid(state) THEN json_extract(state, '$.legalHold') END, 0) = 1)`;
 
 export const retention: RetentionRepo = {
@@ -41,11 +42,15 @@ export const retention: RetentionRepo = {
   },
   async findCustomerConversations(tenantId, channel, externalId) {
     return (db().prepare("SELECT * FROM conversations WHERE tenant_id = ? AND channel = ? AND external_id = ?")
-      .all(tenantId, channel, externalId) as Row[]).map((r): CustomerConversation => ({
-      id: r.id as string, channel: r.channel as string, externalId: r.external_id as string, customerName: r.customer_name as string,
-      status: r.status as string, escalationReason: (r.escalation_reason as string) ?? null, state: String(r.state ?? "{}"),
-      createdAt: r.created_at as string, lastMessageAt: r.last_message_at as string,
-    }));
+      .all(tenantId, channel, externalId) as Row[]).map((r): CustomerConversation => {
+      // The legal_hold column is surfaced as state.legalHold so lib/retention's hold check sees it (as in Supabase).
+      const state = Number(r.legal_hold ?? 0) === 1 ? JSON.stringify({ ...json(r.state), legalHold: true }) : String(r.state ?? "{}");
+      return {
+        id: r.id as string, channel: r.channel as string, externalId: r.external_id as string, customerName: r.customer_name as string,
+        status: r.status as string, escalationReason: (r.escalation_reason as string) ?? null, state,
+        createdAt: r.created_at as string, lastMessageAt: r.last_message_at as string,
+      };
+    });
   },
   async deleteConversations(tenantId, ids) {
     const d = db();

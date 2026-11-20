@@ -54,8 +54,9 @@ export function usageRepo(db: Db): UsageRepo {
     async get(tenantId, period = usagePeriod()) { return readUsage(scoped(db, tenantId), period); },
     async remaining(tenantId, now = new Date()) {
       const s = scoped(db, tenantId);
-      const t = await one(db.from("tenants").select("ai_monthly_token_cap").eq("id", s.tenantId).maybeSingle(), "usage.remaining");
+      const t = await one(db.from("tenants").select("ai_monthly_token_cap, status").eq("id", s.tenantId).maybeSingle(), "usage.remaining");
       if (!t) return 0; // unknown tenant: no budget (fail closed)
+      if (t.status !== "active") return 0; // L1: suspended / deleted tenants spend nothing
       const u = await readUsage(s, usagePeriod(now));
       return tokensRemaining(t.ai_monthly_token_cap, u.inputTokens, u.outputTokens);
     },

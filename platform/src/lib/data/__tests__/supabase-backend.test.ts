@@ -32,6 +32,10 @@ defineDataStoreContract({
     fake.tables.platform_admins.push({ user_id: admin, created_at: new Date().toISOString() });
     return { admin, other };
   },
+  async setTenantStatus(tenantId, status) {
+    const row = fake.tables.tenants.find((x) => x.id === tenantId);
+    if (row) row.status = status;
+  },
 });
 
 // ------------------------------------------------------------------ mappers and error mapping
@@ -104,7 +108,7 @@ describe("supabase backend specifics", () => {
     expect(await store.tenants.ensure(slug.toLowerCase(), "otro")).toBe(id);
     expect(await store.tenants.ensure(id, "x")).toBe(id);
     expect(await store.tenants.get(id)).toEqual({
-      id, name: "Mi Tienda", slug: slug.toLowerCase(), plan: "free", status: "active", aiMonthlyTokenCap: 2000000, createdAt: expect.any(String),
+      id, name: "Mi Tienda", slug: slug.toLowerCase(), plan: "free", status: "active", aiMonthlyTokenCap: 300000, createdAt: expect.any(String),
     });
     await expect(store.tenants.ensure("Bad Slug!", "x")).rejects.toBeInstanceOf(DataValidationError);
     await expect(store.tenants.ensure(randomUUID(), "x")).rejects.toBeInstanceOf(DataValidationError);

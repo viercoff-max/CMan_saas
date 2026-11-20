@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DataConflictError, DataValidationError } from "../errors";
+import { SUPABASE_FREE_TOKEN_CAP, TENANT_DEFAULTS } from "../rules";
 import { AUDIT_GLOBAL_TENANT, type DataStore, type SecretKind } from "../types";
 
 export interface ContractTarget {
@@ -19,6 +20,8 @@ export interface ContractTarget {
   addMember?: (tenantId: string, email: string, name: string) => Promise<string>;
   /** Creates two members of `tenantId` and makes ONLY the first a platform admin (undefined: checks skipped). */
   makePlatformAdmin?: (tenantId: string) => Promise<{ admin: string; other: string }>;
+  /** Platform action (SQL today): sets tenants.status. */
+  setTenantStatus: (tenantId: string, status: "active" | "suspended" | "deleted") => Promise<void>;
 }
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -31,6 +34,8 @@ export function defineDataStoreContract(t: ContractTarget): void {
   describe(`DataStore contract [${t.name}]`, () => {
     let data: DataStore;
     const newTenant = async (p: string, name = p) => data.tenants.ensure(tenantKey(p), name);
+    // Default monthly AI cap of a new tenant: Supabase self-serve 300k (M3 migration), SQLite on-prem 2M.
+    const CAP = () => (data.backend === "supabase" ? SUPABASE_FREE_TOKEN_CAP : TENANT_DEFAULTS.aiMonthlyTokenCap);
     beforeEach(() => { data = t.store(); });
 
     // ------------------------------------------------------------------ part 1: tenant isolation
@@ -120,8 +125,8 @@ export function defineDataStoreContract(t: ContractTarget): void {
         expect(await data.audit.find(A, { action: "test.action" })).toBeNull();
         expect(await data.audit.list(A)).toEqual([]);
         expect((await data.usage.get(A)).inputTokens).toBe(0);
-        expect(await data.usage.remaining(A)).toBe(2_000_000); // B's 150 tokens never count against A's budget
-        expect(await data.usage.remaining(B)).toBe(2_000_000 - 150);
+        expect(await data.usage.remaining(A)).toBe(CAP()); // B's 150 tokens never count against A's budget
+        expect(await data.usage.remaining(B)).toBe(CAP() - 150);
         expect(await data.limiter.countLookupFailures(A, 0)).toBe(0);
         expect(await data.limiter.countLookupFailures(A, 0, { orderHash: "order-hash-b" })).toBe(0);
         expect(await data.retention.findCustomerConversations(A, "whatsapp", "5215500000000")).toEqual([]);
@@ -286,7 +291,7 @@ export function defineDataStoreContract(t: ContractTarget): void {
       it("tenants.get returns the public tenant record with plan defaults", async () => {
         const T = await newTenant("tg", "Tienda G");
         const t1 = await data.tenants.get(T);
-        expect(t1).toMatchObject({ id: T, name: "Tienda G", plan: "free", status: "active", aiMonthlyTokenCap: 2_000_000 });
+        expect(t1).toMatchObject({ id: T, name: "Tienda G", plan: "free", status: "active", aiMonthlyTokenCap: CAP() });
         expect(t1!.slug).toMatch(/^tg-/);
         expect(Number.isNaN(Date.parse(t1!.createdAt))).toBe(false);
         expect(await data.tenants.get(randomUUID())).toBeNull();
@@ -315,7 +320,7 @@ export function defineDataStoreContract(t: ContractTarget): void {
         expect(all.period).toMatch(/^\d{4}-\d{2}-01$/);
         expect(all.items.map((x) => x.id).sort()).toEqual([a, b, c].sort());
         const ra = all.items.find((x) => x.id === a)!;
-        expect(ra).toMatchObject({ name: `List ${tag} A`, plan: "free", status: "active", aiMonthlyTokenCap: 2_000_000, conversationsThisMonth: 2, connectedChannels: 1, aiTokensThisMonth: 120 });
+        expect(ra).toMatchObject({ name: `List ${tag} A`, plan: "free", status: "active", aiMonthlyTokenCap: CAP(), conversationsThisMonth: 2, connectedChannels: 1, aiTokensThisMonth: 120 });
         if (t.addMember) expect(ra.members).toBe(1);
         expect(all.items.find((x) => x.id === b)).toMatchObject({ conversationsThisMonth: 1, connectedChannels: 0, aiTokensThisMonth: 5, members: 0 });
         expect(all.items.find((x) => x.id === c)).toMatchObject({ conversationsThisMonth: 0, connectedChannels: 0, aiTokensThisMonth: 0, members: 0 });
@@ -337,12 +342,12 @@ export function defineDataStoreContract(t: ContractTarget): void {
 
       it("usage.remaining = cap - (input + output) this month, never negative, 0 for unknown tenants", async () => {
         const T = await newTenant("rem");
-        expect(await data.usage.remaining(T)).toBe(2_000_000);
+        expect(await data.usage.remaining(T)).toBe(CAP());
         await data.usage.record(T, { inputTokens: 1500, outputTokens: 500 });
-        expect(await data.usage.remaining(T)).toBe(1_998_000);
+        expect(await data.usage.remaining(T)).toBe(CAP() - 2000);
         await data.usage.record(T, { inputTokens: 3_000_000, outputTokens: 1 }, new Date("2000-01-02T00:00:00Z"));
         expect(await data.usage.remaining(T, new Date("2000-01-20T00:00:00Z"))).toBe(0);
-        expect(await data.usage.remaining(T)).toBe(1_998_000);
+        expect(await data.usage.remaining(T)).toBe(CAP() - 2000);
         expect(await data.usage.remaining(randomUUID())).toBe(0);
       });
 
@@ -413,6 +418,95 @@ export function defineDataStoreContract(t: ContractTarget): void {
         await data.messages.add(T, b.id, { direction: "in", sender: "customer", body: "uno" });
         expect(await data.conversations.delete(T, b.id)).toEqual({ conversations: 1, messages: 1 });
         expect(await data.conversations.get(T, b.id)).toBeNull();
+      });
+
+      // H1 (REVIEW-security-2): the legal hold is sticky. Resolve / return to bot / re-escalation / state writes never
+      // clear it, the purge keeps the conversation (masked) and the customer lookup reports it as held.
+      it("legal hold: set by a safety/legal escalation, kept by resolve, return-to-bot, re-escalation and setState", async () => {
+        const T = await newTenant("hold"), O = await newTenant("hold-other");
+        const c = await data.conversations.getOrCreate(T, "messenger", `psid-${randomUUID()}`, "Ana");
+        const plain = await data.conversations.getOrCreate(T, "messenger", `psid-${randomUUID()}`, "Beto");
+        const m = await data.messages.add(T, c.id, { direction: "in", sender: "customer", body: "sacó humo y me quemé" });
+        expect((await data.conversations.get(T, c.id))?.legalHold).toBe(false);
+
+        await data.conversations.setStatus(T, c.id, "needs_human", "safety");
+        expect((await data.conversations.get(T, c.id))?.legalHold).toBe(true);
+        // The inbox "Resolve" sequence (status route): setStatus(resolved) + resetForBot.
+        await data.conversations.setStatus(T, c.id, "resolved");
+        await data.conversations.resetForBot(T, c.id);
+        let r = await data.conversations.get(T, c.id);
+        expect(r?.escalationReason).toBeNull(); // display-only reason is cleared...
+        expect(r?.legalHold).toBe(true); // ...the hold is not
+        // "Return to bot", a later escalation with another reason and an engine state write keep it too.
+        await data.conversations.setStatus(T, c.id, "bot");
+        await data.conversations.resetForBot(T, c.id);
+        await data.conversations.setStatus(T, c.id, "needs_human", "human_request");
+        await data.conversations.setState(T, c.id, {});
+        r = await data.conversations.get(T, c.id);
+        expect(r?.escalationReason).toBe("human_request");
+        expect(r?.legalHold).toBe(true);
+        // "legal" holds as well; other reasons do not.
+        await data.conversations.setStatus(T, plain.id, "needs_human", "no_answer");
+        expect((await data.conversations.get(T, plain.id))?.legalHold).toBe(false);
+        await data.conversations.setStatus(T, plain.id, "needs_human", "legal");
+        await data.conversations.resetForBot(T, plain.id);
+        expect((await data.conversations.get(T, plain.id))?.legalHold).toBe(true);
+
+        // Purge: kept (body masked), even though it is idle and its reason is gone.
+        await data.conversations.setTimestamps(T, c.id, { lastMessageAt: OLD, createdAt: OLD });
+        await data.messages.setCreatedAt(T, m.id, OLD);
+        const p = await data.retention.purgeTenant(T, {
+          cutoff: new Date(Date.now() - 90 * 86_400_000).toISOString(), maskCutoff: new Date(Date.now() - 365 * 86_400_000).toISOString(), maskedBody: "[masked]",
+        });
+        expect(p.deletedConversationIds).not.toContain(c.id);
+        expect((await data.messages.list(T, c.id)).map((x) => x.body)).toEqual(["[masked]"]);
+        // Customer lookups (delete-customer / Meta deletion) see the hold through state.legalHold.
+        const found = await data.retention.findCustomerConversations(T, "messenger", c.externalId);
+        expect(JSON.parse(found[0].state).legalHold).toBe(true);
+
+        // Cross-tenant: tenant O escalating with T's id holds nothing and changes nothing in T.
+        const fresh = await data.conversations.getOrCreate(T, "telegram", `chat-${randomUUID()}`, "Caro");
+        await data.conversations.setStatus(O, fresh.id, "needs_human", "safety");
+        const f = await data.conversations.get(T, fresh.id);
+        expect(f?.legalHold).toBe(false);
+        expect(f?.status).toBe("bot");
+        expect(await data.conversations.get(O, c.id)).toBeNull();
+      });
+    });
+
+    // L1 (REVIEW-security-2): suspended / deleted tenants get no webhook routing and no AI budget.
+    describe("tenant status", () => {
+      it("isActive, webhook routing and the AI budget follow tenants.status; other tenants are unaffected", async () => {
+        const S = await newTenant("susp"), K = await newTenant("keep");
+        const extS = `page-${randomUUID()}`, extK = `page-${randomUUID()}`;
+        await data.channels.save(S, "messenger", { status: "connected", publicInfo: { externalId: extS } });
+        await data.channels.save(S, "telegram", { status: "connected", publicInfo: { externalId: `bot-${S}` } });
+        await data.channels.save(K, "messenger", { status: "connected", publicInfo: { externalId: extK } });
+        const hookS = (await data.channels.get(S, "telegram")).webhookId!;
+        expect(await data.tenants.isActive(S)).toBe(true);
+        expect(await data.channels.findTenantByExternalId("messenger", extS)).toBe(S);
+        expect(await data.channels.findByWebhookId("telegram", hookS)).toEqual({ tenantId: S, channel: "telegram" });
+
+        for (const status of ["suspended", "deleted"] as const) {
+          await t.setTenantStatus(S, status);
+          expect(await data.tenants.isActive(S)).toBe(false);
+          expect((await data.tenants.get(S))?.status).toBe(status);
+          expect(await data.channels.findTenantByExternalId("messenger", extS)).toBeNull();
+          expect(await data.channels.findByWebhookId("telegram", hookS)).toBeNull();
+          expect(await data.usage.remaining(S)).toBe(0);
+          // The other tenant keeps working.
+          expect(await data.tenants.isActive(K)).toBe(true);
+          expect(await data.channels.findTenantByExternalId("messenger", extK)).toBe(K);
+          expect(await data.usage.remaining(K)).toBe(CAP());
+        }
+        // The account stays owned while suspended (unique index): another tenant still cannot take it.
+        await expect(data.channels.save(K, "telegram", { status: "connected", publicInfo: { externalId: `bot-${S}` } })).rejects.toBeInstanceOf(DataConflictError);
+
+        await t.setTenantStatus(S, "active");
+        expect(await data.tenants.isActive(S)).toBe(true);
+        expect(await data.channels.findByWebhookId("telegram", hookS)).toEqual({ tenantId: S, channel: "telegram" });
+        expect(await data.usage.remaining(S)).toBe(CAP());
+        expect(await data.tenants.isActive(randomUUID())).toBe(data.backend === "sqlite"); // SQLite: no row = legacy active
       });
     });
 

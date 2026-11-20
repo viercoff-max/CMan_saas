@@ -23,6 +23,12 @@ export const addons: AddonsRepo = {
   },
 };
 
+/** Same rule as tenants.isActive (no tenants row = legacy single-tenant DB = active). */
+function tenantActive(tenantId: string): boolean {
+  const r = db().prepare("SELECT status FROM tenants WHERE id = ?").get(tenantId) as Row | undefined;
+  return !r || String(r.status ?? "active") === "active";
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const channels: ChannelsRepo = {
@@ -52,14 +58,15 @@ export const channels: ChannelsRepo = {
   },
   async findTenantByExternalId(channel, externalId) {
     const rows = db().prepare("SELECT tenant_id, public_info FROM channel_accounts WHERE channel=? AND status='connected'").all(channel) as Row[];
-    return (rows.find((r) => json(r.public_info).externalId === externalId)?.tenant_id as string) ?? null;
+    const t = (rows.find((r) => json(r.public_info).externalId === externalId)?.tenant_id as string) ?? null;
+    return t && tenantActive(t) ? t : null; // L1: suspended / deleted tenants get no webhook traffic
   },
   // CROSS-TENANT by design (Telegram webhook routing). Connected accounts only.
   async findByWebhookId(channel, webhookId) {
     if (typeof webhookId !== "string" || !UUID.test(webhookId)) return null;
     const r = db().prepare("SELECT tenant_id FROM channel_accounts WHERE channel=? AND webhook_id=? AND status='connected'")
       .get(channel, webhookId.toLowerCase()) as Row | undefined;
-    return r ? { tenantId: r.tenant_id as string, channel } : null;
+    return r && tenantActive(r.tenant_id as string) ? { tenantId: r.tenant_id as string, channel } : null;
   },
 };
 

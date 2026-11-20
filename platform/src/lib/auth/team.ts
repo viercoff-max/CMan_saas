@@ -70,11 +70,14 @@ export async function acceptInvite(client: SupabaseClient, token: string): Promi
   return !error && typeof data === "string" ? { ok: true, tenantId: data } : { ok: false };
 }
 
-export type CreateTenantResult = { ok: true; tenantId: string } | { ok: false; error: "slug_taken" | "limit" | "failed" };
+export type CreateTenantResult = { ok: true; tenantId: string } | { ok: false; error: "slug_taken" | "name_reserved" | "limit" | "failed" };
 export async function createTenant(client: SupabaseClient, name: string, slug: string): Promise<CreateTenantResult> {
   const { data, error } = await client.rpc("create_tenant", { p_name: name, p_slug: slug });
   if (!error && typeof data === "string") return { ok: true, tenantId: data };
   if (error?.code === "23505") return { ok: false, error: "slug_taken" };
+  // L8: a reserved slug looks exactly like a taken one (the reserved list is not disclosed).
+  if (error?.message?.includes("slug_reserved")) return { ok: false, error: "slug_taken" };
+  if (error?.message?.includes("name_reserved")) return { ok: false, error: "name_reserved" };
   if (error?.message?.includes("tenant_limit_reached")) return { ok: false, error: "limit" };
   return { ok: false, error: "failed" };
 }

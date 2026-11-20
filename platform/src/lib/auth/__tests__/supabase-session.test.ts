@@ -110,3 +110,23 @@ describe("getSession / requireRole / setActiveTenant (DATA_BACKEND=supabase)", (
     expect(G.__sets).toEqual([expect.objectContaining({ name: "active_tenant", value: TB, opts: expect.objectContaining({ httpOnly: true, sameSite: "lax" }) })]);
   });
 });
+
+// L1 (REVIEW-security-2): suspended / deleted tenants give no app access.
+describe("tenant status in session resolution", () => {
+  it("suspended tenants are dropped; only-suspended users get no_tenant + suspended (no onboarding)", async () => {
+    const mixed = await resolveSupabaseAuth(client([
+      { tenant_id: TA, role: "owner", tenants: { name: "Suspendida", status: "suspended" } },
+      { tenant_id: TB, role: "agent", tenants: { name: "Activa", status: "active" } },
+    ]).client, TA); // cookie names the suspended tenant: ignored
+    expect(mixed.status === "ok" && [mixed.session.tenantId, mixed.session.tenants.map((t) => t.id)]).toEqual([TB, [TB]]);
+    const only = await resolveSupabaseAuth(client([
+      { tenant_id: TA, role: "owner", tenants: { name: "Suspendida", status: "suspended" } },
+    ]).client, TA);
+    expect(only).toMatchObject({ status: "no_tenant", suspended: true });
+    const deleted = await resolveSupabaseAuth(client([
+      { tenant_id: TA, role: "owner", tenants: { name: "Borrada", status: "deleted" } },
+    ]).client, TA);
+    expect(deleted.status).toBe("no_tenant");
+    expect("suspended" in deleted && deleted.suspended).toBeFalsy();
+  });
+});

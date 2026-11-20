@@ -30,6 +30,9 @@ if (!enabled) {
       const { data } = await db.from("tenant_secrets").select("config_enc").eq("tenant_id", tenantId).eq("kind", kind).eq("key", key).maybeSingle();
       return ((data as { config_enc?: string } | null)?.config_enc) ?? null;
     },
+    async setTenantStatus(tenantId, status) {
+      await db.from("tenants").update({ status }).eq("id", tenantId);
+    },
   });
 
   afterAll(async () => {

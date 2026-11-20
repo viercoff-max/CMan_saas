@@ -17,7 +17,11 @@ export interface Session {
 export interface AuthUser { id: string; email: string; name: string }
 export type AuthState =
   | { status: "anonymous" }
-  | { status: "no_tenant"; user: AuthUser }
+  /**
+   * Signed in without a usable tenant. `suspended`: every tenant the user belongs to is suspended (L1); show
+   * "tu negocio está suspendido" instead of onboarding (the create_tenant RPC also refuses suspended owners).
+   */
+  | { status: "no_tenant"; user: AuthUser; suspended?: boolean }
   | { status: "ok"; session: Session };
 
 /**

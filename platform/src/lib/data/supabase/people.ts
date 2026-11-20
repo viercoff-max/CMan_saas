@@ -16,6 +16,11 @@ export function tenantsRepo(db: Db): TenantsRepo {
       const r = await one(db.from("tenants").select(TENANT_COLUMNS).eq("id", tenantId).maybeSingle(), "tenants.get");
       return r ? mapTenant(r) : null;
     },
+    async isActive(tenantId) {
+      if (!isUuid(tenantId)) return false;
+      const r = await one(db.from("tenants").select("status").eq("id", tenantId).maybeSingle(), "tenants.isActive");
+      return r?.status === "active";
+    },
     // CROSS-TENANT by design (platform-admin screen; the caller checked platformAdmins first). One RPC computes the
     // page and its counts in SQL (migration 20261120002400_platform_tenant_overview.sql, service_role only).
     async listAll(q = {}) {

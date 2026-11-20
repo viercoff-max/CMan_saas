@@ -22,25 +22,38 @@ export async function supabaseUser(client: SupabaseClient): Promise<AuthUser | n
 
 type MemberRow = { tenant_id: string; role: string; tenants: { name?: string; status?: string } | { name?: string; status?: string }[] | null };
 
-export async function listMemberships(client: SupabaseClient, userId: string): Promise<TenantMembership[]> {
+/**
+ * ACTIVE memberships only (L1, REVIEW-security-2): tenants that are suspended or deleted give no app access.
+ * `suspended` counts the user's memberships of suspended tenants (so the app can say why instead of onboarding).
+ */
+async function readMemberships(client: SupabaseClient, userId: string): Promise<{ active: TenantMembership[]; suspended: number }> {
   const { data, error } = await client
     .from("tenant_members")
     .select("tenant_id, role, created_at, tenants(name, status)")
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
   if (error) throw new Error("membership_lookup_failed"); // fail closed, no details
-  const out: TenantMembership[] = [];
+  const active: TenantMembership[] = [];
+  let suspended = 0;
   for (const r of (data ?? []) as MemberRow[]) {
     const t = Array.isArray(r.tenants) ? r.tenants[0] : r.tenants;
-    if (!t || t.status === "deleted" || !isRole(r.role) || typeof r.tenant_id !== "string") continue;
-    out.push({ id: r.tenant_id, name: String(t.name ?? ""), role: r.role });
+    if (!t || !isRole(r.role) || typeof r.tenant_id !== "string") continue;
+    if (t.status === "suspended") { suspended++; continue; }
+    if (t.status !== "active") continue; // deleted (or unknown): as if the membership did not exist
+    active.push({ id: r.tenant_id, name: String(t.name ?? ""), role: r.role });
   }
-  return out;
+  return { active, suspended };
+}
+
+export async function listMemberships(client: SupabaseClient, userId: string): Promise<TenantMembership[]> {
+  return (await readMemberships(client, userId)).active;
 }
 
 /** Full resolution for one request: user -> memberships -> active tenant (cookie checked against memberships). */
 export async function resolveSupabaseAuth(client: SupabaseClient, activeTenantCookie: string | null | undefined): Promise<AuthState> {
   const user = await supabaseUser(client);
   if (!user) return { status: "anonymous" };
-  return toSession(user, await listMemberships(client, user.id), activeTenantCookie);
+  const m = await readMemberships(client, user.id);
+  if (!m.active.length && m.suspended > 0) return { status: "no_tenant", user, suspended: true };
+  return toSession(user, m.active, activeTenantCookie);
 }

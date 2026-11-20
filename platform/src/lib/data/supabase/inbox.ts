@@ -5,13 +5,14 @@
 //   * Deleting a conversation goes through retention_delete_conversations (one transaction).
 import { nowIso } from "../../ids";
 import type { ConversationStatus } from "../../types";
+import { isLegalHoldReason } from "../rules";
 import type { ConversationsRepo, MessagesRepo } from "../types";
 import { isUuid, scoped, type Db, type Row, type Scoped } from "./client";
 import {
   UQ_MSG_PROVIDER, allRows, cap, count, escapeLike, isUniqueViolation, mapConversation, mapDbError, mapMessage, obj, one, rows, run,
 } from "./map";
 
-const CONV_COLS = "id, tenant_id, channel, external_id, customer_name, status, escalation_reason, state, last_message_at, unread, created_at";
+const CONV_COLS = "id, tenant_id, channel, external_id, customer_name, status, escalation_reason, state, last_message_at, unread, legal_hold, created_at";
 const MSG_COLS = "id, conversation_id, tenant_id, direction, sender, body, meta, provider_message_id, created_at";
 const STATUSES: ConversationStatus[] = ["bot", "needs_human", "human", "resolved"];
 
@@ -77,6 +78,9 @@ export function conversationsRepo(db: Db): ConversationsRepo {
       if (!isUuid(id)) return;
       const patch: Row = { status };
       if (reason !== null && reason !== undefined) patch.escalation_reason = cap(reason, 40);
+      // H1: sticky legal hold. Only ever set to true here (the DB trigger from migration 20261120013722 does the same
+      // and refuses to clear it); no app code path writes legal_hold = false.
+      if (isLegalHoldReason(reason)) patch.legal_hold = true;
       await run(scoped(db, tenantId).from("conversations").update(patch).eq("id", id), "conversations.setStatus");
     },
     async setState(tenantId, id, state) {
@@ -95,6 +99,7 @@ export function conversationsRepo(db: Db): ConversationsRepo {
       STATUSES.forEach((st, i) => { out[st] = counts[i]; });
       return out;
     },
+    // escalation_reason is display-only; legal_hold is never part of this patch (H1).
     async resetForBot(tenantId, id) {
       const s = scoped(db, tenantId);
       const c = await getConv(s, id);

@@ -49,6 +49,11 @@ export interface Conversation {
   id: string; tenantId: string; channel: Channel; externalId: string; customerName: string;
   status: ConversationStatus; escalationReason: string | null; state: Record<string, unknown>;
   lastMessageAt: string; unread: number; createdAt: string;
+  /**
+   * Sticky legal hold (safety/legal escalation, REVIEW-security-2 H1). Set by the data layer, never cleared by app
+   * code: the retention purge, customer deletion and the Meta deletion callback keep these conversations.
+   */
+  legalHold?: boolean;
 }
 export interface Message {
   id: string; conversationId: string; tenantId: string; direction: "in" | "out";

@@ -7,7 +7,7 @@ import { z } from "zod";
 import { getAuthState, logout } from "@/lib/auth";
 import { authBackend } from "@/lib/auth/backend";
 import { ACTIVE_TENANT_COOKIE, baseCookieOptions } from "@/lib/auth/cookies";
-import { isValidSlug } from "@/lib/auth/slug";
+import { isReservedName, isReservedSlug, isValidSlug } from "@/lib/auth/slug";
 
 export type OnboardingState = { error?: "name" | "slug_format" | "slug_taken" | "limit" | "failed" };
 
@@ -17,16 +17,18 @@ export async function createTenantAction(_prev: OnboardingState, form: FormData)
   if (authBackend() !== "supabase") redirect("/dashboard");
   const st = await getAuthState();
   if (st.status === "anonymous") redirect("/login?next=%2Fonboarding");
+  if (st.status === "no_tenant" && st.suspended) return { error: "failed" }; // L1 (create_tenant refuses too)
   const name = Name.safeParse(form.get("name"));
-  if (!name.success) return { error: "name" };
+  if (!name.success || isReservedName(name.data)) return { error: "name" }; // L8: reserved names (create_tenant checks too)
   const slug = String(form.get("slug") ?? "").trim().toLowerCase();
+  if (isReservedSlug(slug)) return { error: "slug_taken" }; // L8: same answer as a taken slug (list not disclosed)
   if (!isValidSlug(slug)) return { error: "slug_format" };
 
   const [{ createSupabaseServerClient }, { createTenant }] = await Promise.all([
     import("@/lib/auth/supabase-server"), import("@/lib/auth/team"),
   ]);
   const r = await createTenant(await createSupabaseServerClient(), name.data, slug);
-  if (!r.ok) return { error: r.error === "slug_taken" ? "slug_taken" : r.error === "limit" ? "limit" : "failed" };
+  if (!r.ok) return { error: r.error === "slug_taken" ? "slug_taken" : r.error === "name_reserved" ? "name" : r.error === "limit" ? "limit" : "failed" };
   (await cookies()).set(ACTIVE_TENANT_COOKIE, r.tenantId, { ...baseCookieOptions(), maxAge: 60 * 60 * 24 * 365 });
   redirect("/onboarding?step=brand"); // step 2 "Tu marca" (skippable), then the dashboard
 }

@@ -203,3 +203,34 @@ describe("Meta data deletion callback", () => {
     expect(await deletionStatus("ABCDEF0123456789ABCD")).toBe("unknown");
   });
 });
+
+// H1 (REVIEW-security-2): the repro of the review, through the data layer. A safety escalation followed by the
+// inbox "Resolve" sequence (setStatus resolved + resetForBot) must keep the conversation out of the purge and out of
+// customer / Meta deletions (unless force).
+describe("legal hold is sticky (H1)", () => {
+  it("resolve after a safety escalation: purge, delete-customer and Meta deletion keep the transcript", async () => {
+    const { getData } = await import("../../data");
+    const data = getData();
+    const t = "t-hold";
+    const c = await data.conversations.getOrCreate(t, "messenger", "psid-h1", "Ana");
+    await data.messages.add(t, c.id, { direction: "in", sender: "customer", body: "mi freidora sacó humo y me quemé" });
+    await data.conversations.setStatus(t, c.id, "needs_human", "safety");
+    await data.conversations.setStatus(t, c.id, "resolved");
+    await data.conversations.resetForBot(t, c.id);
+    expect((await data.conversations.get(t, c.id))?.escalationReason).toBeNull();
+
+    await purgeOldData(undefined, new Date(Date.now() + 200 * 86_400_000));
+    expect(exists(c.id)).toBe(true);
+    expect(msgCount(c.id)).toBe(1);
+
+    const d = await deleteCustomerData(t, "messenger", "psid-h1");
+    expect(d).toMatchObject({ conversations: 0, heldConversations: 1 });
+    expect(exists(c.id)).toBe(true);
+    // Another tenant's deletion for the same external id never touches it (cross-tenant).
+    expect((await deleteCustomerData("t-other", "messenger", "psid-h1", { force: true })).conversations).toBe(0);
+    expect(exists(c.id)).toBe(true);
+    // Only an explicit, audited force deletes it.
+    expect((await deleteCustomerData(t, "messenger", "psid-h1", { force: true })).conversations).toBe(1);
+    expect(exists(c.id)).toBe(false);
+  });
+});

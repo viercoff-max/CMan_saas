@@ -12,6 +12,13 @@ import { externalIdOf, mapAddon, mapChannel, one, rows, run } from "./map";
 const clearSecret = (s: Scoped, kind: string, key: string, ctx: string) =>
   run(s.from("tenant_secrets").update({ config_enc: null, updated_at: nowIso() }).eq("kind", kind).eq("key", key), ctx);
 
+/** CROSS-TENANT status read (webhook routing only): same rule as tenants.isActive. */
+async function tenantActive(db: Db, tenantId: string): Promise<boolean> {
+  if (!isUuid(tenantId)) return false;
+  const r = await one(db.from("tenants").select("status").eq("id", tenantId).maybeSingle(), "channels.tenantActive");
+  return r?.status === "active";
+}
+
 export function addonsRepo(db: Db): AddonsRepo {
   return {
     async get(tenantId, key) {
@@ -48,13 +55,14 @@ export function channelsRepo(db: Db): ChannelsRepo {
       const ext = String(externalId ?? "").trim();
       if (!ext) return null;
       const rs = await rows(db.from("channel_accounts").select("tenant_id").eq("channel", channel).eq("external_id", ext).eq("status", "connected").limit(1), "channels.findTenantByExternalId");
-      return (rs[0]?.tenant_id as string) ?? null;
+      const t = (rs[0]?.tenant_id as string) ?? null;
+      return t && await tenantActive(db, t) ? t : null; // L1: suspended / deleted tenants get no webhook traffic
     },
     // CROSS-TENANT by design (Telegram webhook routing): channel_accounts.webhook_id is a unique uuid.
     async findByWebhookId(channel, webhookId) {
       if (!isUuid(webhookId)) return null;
       const r = await one(db.from("channel_accounts").select("tenant_id").eq("channel", channel).eq("webhook_id", webhookId.toLowerCase()).eq("status", "connected").maybeSingle(), "channels.findByWebhookId");
-      return r ? { tenantId: r.tenant_id as string, channel } : null;
+      return r && await tenantActive(db, r.tenant_id as string) ? { tenantId: r.tenant_id as string, channel } : null;
     },
   };
 }

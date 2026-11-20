@@ -2,6 +2,7 @@
 // (indexed by idx_msg_provider); the Supabase schema has a dedicated column with a unique index.
 import { newId, nowIso } from "../../ids";
 import type { Channel, Conversation, ConversationStatus, Message, Sender } from "../../types";
+import { isLegalHoldReason } from "../rules";
 import type { ConversationsRepo, MessagesRepo } from "../types";
 import { db, json, tx, type Row } from "./conn";
 
@@ -10,6 +11,7 @@ const mapConv = (r: Row): Conversation => ({
   customerName: r.customer_name as string, status: r.status as ConversationStatus,
   escalationReason: (r.escalation_reason as string) ?? null, state: json(r.state),
   lastMessageAt: r.last_message_at as string, unread: r.unread as number, createdAt: r.created_at as string,
+  legalHold: Number(r.legal_hold ?? 0) === 1,
 });
 const mapMsg = (r: Row): Message => {
   const meta = json(r.meta);
@@ -53,9 +55,11 @@ export const conversations: ConversationsRepo = {
     args.push(f.limit ?? 200);
     return (db().prepare(`SELECT * FROM conversations WHERE ${where.join(" AND ")} ORDER BY last_message_at DESC LIMIT ?`).all(...args) as Row[]).map(mapConv);
   },
+  // H1: a safety/legal escalation sets the sticky legal_hold; nothing here (or anywhere in app code) clears it.
   async setStatus(tenantId, id, status, reason) {
-    db().prepare("UPDATE conversations SET status=?, escalation_reason=COALESCE(?, escalation_reason) WHERE tenant_id=? AND id=?")
-      .run(status, reason ?? null, tenantId, id);
+    db().prepare(`UPDATE conversations SET status=?, escalation_reason=COALESCE(?, escalation_reason),
+        legal_hold = CASE WHEN ? = 1 THEN 1 ELSE legal_hold END WHERE tenant_id=? AND id=?`)
+      .run(status, reason ?? null, isLegalHoldReason(reason) ? 1 : 0, tenantId, id);
   },
   async setState(tenantId, id, state) {
     db().prepare("UPDATE conversations SET state=? WHERE tenant_id=? AND id=?").run(JSON.stringify(state), tenantId, id);
@@ -69,6 +73,7 @@ export const conversations: ConversationsRepo = {
       out[r.status as ConversationStatus] = r.c as number;
     return out;
   },
+  // escalation_reason is display-only; the legal_hold column is kept (H1).
   async resetForBot(tenantId, id) {
     const d = db();
     d.prepare("UPDATE conversations SET escalation_reason=NULL WHERE tenant_id=? AND id=?").run(tenantId, id);

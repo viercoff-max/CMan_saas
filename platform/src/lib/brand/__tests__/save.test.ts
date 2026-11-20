@@ -49,8 +49,14 @@ function form(fields: Record<string, string>, logo?: { bytes: Uint8Array; type: 
   if (logo) f.set("logo", new File([logo.bytes as BlobPart], logo.name ?? "logo.png", { type: logo.type }));
   return f;
 }
-function req(body: FormData, headers: Record<string, string> = { origin: "http://localhost:3000", "sec-fetch-site": "same-origin" }) {
-  return new Request("http://localhost:3000/brand/save", { method: "POST", body, headers: { host: "localhost:3000", ...headers } });
+// Like a browser: the multipart body is sent with its Content-Length (the route requires it, L6).
+async function req(body: FormData, headers: Record<string, string> = { origin: "http://localhost:3000", "sec-fetch-site": "same-origin" }) {
+  const encoded = new Request("http://localhost:3000/brand/save", { method: "POST", body });
+  const bytes = new Uint8Array(await encoded.arrayBuffer());
+  return new Request("http://localhost:3000/brand/save", {
+    method: "POST", body: bytes,
+    headers: { host: "localhost:3000", "content-type": encoded.headers.get("content-type")!, "content-length": String(bytes.byteLength), ...headers },
+  });
 }
 
 describe("parseBrandForm", () => {
@@ -163,13 +169,13 @@ describe("POST /brand/save", () => {
   it("401 anonymous, 403 agent, 403 cross-origin", async () => {
     const A = await tenant("rt");
     auth.session = null;
-    expect((await POST(req(form({ primaryColor: "#B42318" })))).status).toBe(401);
+    expect((await POST(await req(form({ primaryColor: "#B42318" })))).status).toBe(401);
     auth.session = sess(A, "agent");
-    const r = await POST(req(form({ primaryColor: "#B42318" })));
+    const r = await POST(await req(form({ primaryColor: "#B42318" })));
     expect(r.status).toBe(403);
     expect(await r.json()).toMatchObject({ error: "forbidden" });
     auth.session = sess(A);
-    expect((await POST(req(form({ primaryColor: "#B42318" }), { origin: "https://evil.example", "sec-fetch-site": "cross-site" }))).status).toBe(403);
+    expect((await POST(await req(form({ primaryColor: "#B42318" }), { origin: "https://evil.example", "sec-fetch-site": "cross-site" }))).status).toBe(403);
     expect((await getData().brand.get(A)).primaryColor).not.toBe("#B42318");
   });
 
@@ -177,7 +183,7 @@ describe("POST /brand/save", () => {
     const A = await tenant("ra"), B = await tenant("rb");
     const bBefore = await getData().brand.get(B);
     auth.session = sess(A);
-    const r = await POST(req(form({ tenantId: B, primaryColor: "#B42318", displayName: "Chefman" }, { bytes: PNG, type: "image/png" })));
+    const r = await POST(await req(form({ tenantId: B, primaryColor: "#B42318", displayName: "Chefman" }, { bytes: PNG, type: "image/png" })));
     expect(r.status).toBe(200);
     const j = await r.json();
     expect(j).toMatchObject({ ok: true, brand: { primaryColor: "#B42318", displayName: "Chefman" } });
@@ -188,14 +194,34 @@ describe("POST /brand/save", () => {
   it("400 with the field name for invalid input; logo errors in plain codes", async () => {
     const A = await tenant("rv");
     auth.session = sess(A);
-    const bad = await POST(req(form({ accentColor: "#GGGGGG" })));
+    const bad = await POST(await req(form({ accentColor: "#GGGGGG" })));
     expect(bad.status).toBe(400);
     expect(await bad.json()).toEqual({ ok: false, error: "invalid", field: "accentColor" });
-    const svg = await POST(req(form({}, { bytes: SVG, type: "image/svg+xml", name: "logo.svg" })));
+    const svg = await POST(await req(form({}, { bytes: SVG, type: "image/svg+xml", name: "logo.svg" })));
     expect(svg.status).toBe(400);
     expect(await svg.json()).toEqual({ ok: false, error: "bad_type" });
-    const big = await POST(req(form({}, { bytes: new Uint8Array(LOGO_MAX_BYTES + 10), type: "image/png" })));
+    const big = await POST(await req(form({}, { bytes: new Uint8Array(LOGO_MAX_BYTES + 10), type: "image/png" })));
     expect(big.status).toBe(413);
     expect(await big.json()).toMatchObject({ error: "too_big" });
+  });
+});
+
+// L6 (REVIEW-security-2): no Content-Length (chunked) -> 411, a lying length cannot buffer past the cap.
+describe("POST /brand/save body cap", () => {
+  it("411 without Content-Length; 413 when the stream exceeds the cap whatever the header says", async () => {
+    const A = await tenant("cap");
+    auth.session = sess(A);
+    const chunked = new Request("http://localhost:3000/brand/save", {
+      method: "POST", duplex: "half",
+      body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(10)); c.close(); } }),
+      headers: { host: "localhost:3000", origin: "http://localhost:3000", "sec-fetch-site": "same-origin", "content-type": "multipart/form-data; boundary=x" },
+    } as RequestInit);
+    expect((await POST(chunked)).status).toBe(411);
+    const lying = new Request("http://localhost:3000/brand/save", {
+      method: "POST", duplex: "half",
+      body: new ReadableStream<Uint8Array>({ start(c) { for (let i = 0; i < 40; i++) c.enqueue(new Uint8Array(64 * 1024)); c.close(); } }),
+      headers: { host: "localhost:3000", origin: "http://localhost:3000", "sec-fetch-site": "same-origin", "content-type": "multipart/form-data; boundary=x", "content-length": "100" },
+    } as RequestInit);
+    expect((await POST(lying)).status).toBe(413);
   });
 });

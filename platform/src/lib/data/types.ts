@@ -58,6 +58,13 @@ export interface TenantListPage {
 export interface TenantsRepo {
   get(tenantId: string): Promise<TenantInfo | null>;
   /**
+   * L1 (REVIEW-security-2): false for suspended / deleted tenants. Webhook routing, the AI budget and session
+   * resolution use it so a suspended tenant gets no bot replies, no AI spend and no app access.
+   * Supabase: false for unknown / malformed ids (fail closed). SQLite (on-prem): a tenant without a tenants row
+   * (single-tenant databases from older builds) counts as active.
+   */
+  isActive(tenantId: string): Promise<boolean>;
+  /**
    * CROSS-TENANT by design (platform-admin screen only). The CALLER must first check
    * `platformAdmins.isPlatformAdmin(session.userId)`; this method does not know who is asking.
    * Newest tenants first. Supabase: one RPC (platform_tenant_overview, service_role only); SQLite: one query.
@@ -232,12 +239,12 @@ export interface ChannelsRepo {
    * already has the same external id CONNECTED (one Page / number / bot belongs to one tenant).
    */
   save(tenantId: string, channel: ChannelAccountKey, v: { status: ChannelAccount["status"]; publicInfo?: Record<string, unknown> }): Promise<void>;
-  /** CROSS-TENANT by design (webhook routing): which tenant has this external id connected. */
+  /** CROSS-TENANT by design (webhook routing): which ACTIVE tenant has this external id connected (L1: null otherwise). */
   findTenantByExternalId(channel: ChannelAccountKey, externalId: string): Promise<string | null>;
   /**
    * CROSS-TENANT by design (Telegram webhook routing: /api/webhooks/telegram/<webhookId>). The webhookId is the
-   * public random id of the channel row (`ChannelAccount.webhookId`, a uuid). Only CONNECTED accounts match;
-   * anything else (unknown, malformed, other channel, disconnected) is null. It is NOT a secret: the route must
+   * public random id of the channel row (`ChannelAccount.webhookId`, a uuid). Only CONNECTED accounts of ACTIVE
+   * tenants match; anything else (unknown, malformed, other channel, disconnected, suspended tenant) is null. It is NOT a secret: the route must
    * still check the Telegram secret header against the encrypted secret (lib/channels/telegram-secret.ts).
    */
   findByWebhookId(channel: ChannelAccountKey, webhookId: string): Promise<{ tenantId: string; channel: ChannelAccountKey } | null>;
@@ -271,7 +278,7 @@ export interface UsageRepo {
   get(tenantId: string, period?: string): Promise<UsageRow>;
   /**
    * Tokens left this month: tenants.aiMonthlyTokenCap - (inputTokens + outputTokens) of the month of `now`,
-   * never negative. 0 when the tenant does not exist (fail closed).
+   * never negative. 0 when the tenant does not exist or is not active (fail closed; L1).
    */
   remaining(tenantId: string, now?: Date): Promise<number>;
 }

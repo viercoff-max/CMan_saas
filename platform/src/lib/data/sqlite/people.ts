@@ -31,6 +31,11 @@ export const tenants: TenantsRepo = {
     const r = db().prepare(`SELECT ${TENANT_COLS} FROM tenants t WHERE t.id = ?`).get(tenantId) as Row | undefined;
     return r ? mapTenant(r) : null;
   },
+  async isActive(tenantId) {
+    if (typeof tenantId !== "string" || !tenantId) return false;
+    const r = db().prepare("SELECT status FROM tenants WHERE id = ?").get(tenantId) as Row | undefined;
+    return !r || String(r.status ?? "active") === "active"; // no row: legacy single-tenant on-prem DB
+  },
   async ensure(tenantId, name) {
     db().prepare("INSERT OR IGNORE INTO tenants (id, name) VALUES (?, ?)").run(tenantId, name);
     return tenantId;

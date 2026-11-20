@@ -2,6 +2,7 @@
 // Run the purge daily: `npm run purge` (see docs/RUNBOOK.md). Audit rows carry counts and hashes only, never PII.
 // NOTE: relative imports only (no "@/"), so the CLI scripts in scripts/ can load this file with Node's type stripping.
 import { getData } from "../data";
+import { LEGAL_HOLD_REASONS, isLegalHoldReason } from "../data/rules";
 import type { CustomerConversation } from "../data/types";
 import { hashKey, purgeSecurityRows } from "../security/rate-limit";
 import { deleteOutboxFor, outboxDirs, purgeOutboxBefore } from "../storage/outbox";
@@ -9,8 +10,8 @@ import { deleteOutboxFor, outboxDirs, purgeOutboxBefore } from "../storage/outbo
 export { outboxDirs };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** Escalation reasons that put a conversation on legal hold (product liability / PROFECO). */
-export const LEGAL_HOLD_REASONS = ["safety", "legal"] as const;
+/** Escalation reasons that put a conversation on legal hold (product liability / PROFECO). Sticky: see data/rules.ts. */
+export { LEGAL_HOLD_REASONS };
 export const MASKED_BODY = "[contenido eliminado por política de retención]";
 
 function intEnv(name: string, def: number, min: number): number {
@@ -62,8 +63,10 @@ export async function purgeOldData(tenantId?: string, now: Date = new Date()): P
 }
 
 // ---------- per-customer rights (ARCO / Meta / Shopify) ----------
+// The data layer surfaces the sticky legal_hold column as state.legalHold (both backends), so a conversation that
+// was resolved / returned to the bot after a safety or legal escalation is still held here.
 const isHeld = (c: CustomerConversation) => {
-  if (c.escalationReason && (LEGAL_HOLD_REASONS as readonly string[]).includes(c.escalationReason)) return true;
+  if (isLegalHoldReason(c.escalationReason)) return true;
   try { const h = JSON.parse(c.state || "{}").legalHold; return h === 1 || h === true; } catch { return false; }
 };
 

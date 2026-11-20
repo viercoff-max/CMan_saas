@@ -33,7 +33,7 @@ let serial = 0;
 const bigId = () => ++serial;
 
 export const SCHEMA: Record<string, Spec> = {
-  tenants: { tenant: false, unique: [pk("tenants", ["id"]), uq("tenants", ["slug"])], defaults: () => ({ id: randomUUID(), plan: "free", status: "active", ai_monthly_token_cap: 2000000, created_at: now() }) },
+  tenants: { tenant: false, unique: [pk("tenants", ["id"]), uq("tenants", ["slug"])], defaults: () => ({ id: randomUUID(), plan: "free", status: "active", ai_monthly_token_cap: 300000, created_at: now() }) },
   tenant_members: { tenant: true, unique: [pk("tenant_members", ["tenant_id", "user_id"])], defaults: () => ({ created_at: now() }) },
   platform_admins: { tenant: false, unique: [pk("platform_admins", ["user_id"])], defaults: () => ({ created_at: now() }) },
   brand_settings: { tenant: true, unique: [pk("brand_settings", ["tenant_id"])], defaults: () => ({ display_name: "", logo_path: null, primary_color: "#0F766E", accent_color: "#14181F", menu_bg_color: "#F6F7F9", heading_font: "system", updated_at: now() }) },

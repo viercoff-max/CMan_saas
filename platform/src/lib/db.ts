@@ -121,6 +121,7 @@ function addColumnIfMissing(db: DatabaseSync, table: string, column: string, ddl
  * - brand_settings and ai_usage (same shape as the Supabase schema in supabase/migrations).
  * - tenants.slug / plan / status / ai_monthly_token_cap (wave 1: same defaults as public.tenants).
  * - channel_accounts.webhook_id: public random routing id (Telegram webhook URL), backfilled, unique.
+ * - conversations.legal_hold: sticky legal hold (safety/legal escalations), backfilled once.
  */
 export function runMigrations(db: DatabaseSync): void {
   const steps: [string, () => void][] = [
@@ -181,6 +182,20 @@ export function runMigrations(db: DatabaseSync): void {
       const set = db.prepare("UPDATE channel_accounts SET webhook_id = ? WHERE tenant_id = ? AND channel = ? AND webhook_id IS NULL");
       for (const r of missing) set.run(randomUUID(), r.tenant_id, r.channel);
       db.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_channel_webhook_id ON channel_accounts(webhook_id) WHERE webhook_id IS NOT NULL");
+    }],
+    // H1 (REVIEW-security-2): sticky legal hold, same as public.conversations.legal_hold. Set when a conversation is
+    // escalated for safety/legal and never cleared by app code. Backfilled ONCE, when the column is created, from the
+    // escalation reason, state.legalHold and the engine's escalation_safety / escalation_legal message intents (this
+    // also catches conversations that were already resolved, whose reason had been cleared).
+    ["conversations.legal_hold", () => {
+      const had = (db.prepare("PRAGMA table_info(conversations)").all() as { name: string }[]).some((c) => c.name === "legal_hold");
+      if (had) return;
+      db.exec("ALTER TABLE conversations ADD COLUMN legal_hold INTEGER NOT NULL DEFAULT 0");
+      db.exec(`UPDATE conversations SET legal_hold = 1 WHERE legal_hold = 0 AND (
+        COALESCE(escalation_reason, '') IN ('safety', 'legal')
+        OR COALESCE(CASE WHEN json_valid(state) THEN json_extract(state, '$.legalHold') END, 0) IN (1, 'true', '1')
+        OR EXISTS (SELECT 1 FROM messages m WHERE m.tenant_id = conversations.tenant_id AND m.conversation_id = conversations.id
+                   AND json_valid(m.meta) AND json_extract(m.meta, '$.intent') IN ('escalation_safety', 'escalation_legal')))`);
     }],
   ];
   for (const [name, run] of steps) {

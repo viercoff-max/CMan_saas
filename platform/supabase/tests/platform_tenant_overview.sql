@@ -1,6 +1,7 @@
 -- Tests for public.platform_tenant_overview (migration 20261120002400_platform_tenant_overview.sql).
 -- Run as postgres (SQL editor / MCP execute_sql) AFTER the migration is applied. The DO block always ends by raising,
 -- so every fixture is rolled back. Success message: "PLATFORM_OVERVIEW_TESTS_PASSED (n checks)".
+-- Wave 4: the default cap is 300000 once 20261120013724_free_tier_token_cap is applied (was 2000000).
 do $$
 declare
   ua uuid := gen_random_uuid();
@@ -54,7 +55,7 @@ begin
      or (a->>'ai_tokens_this_month')::bigint <> 1250 then raise exception 'FAIL counts A %', a; end if;
   if (b->>'members')::int <> 1 or (b->>'conversations_this_month')::int <> 1 or (b->>'connected_channels')::int <> 1
      or (b->>'ai_tokens_this_month')::bigint <> 15 then raise exception 'FAIL counts B (or A leaked into B) %', b; end if;
-  if a->>'plan' <> 'free' or a->>'status' <> 'active' or (a->>'ai_monthly_token_cap')::bigint <> 2000000 then raise exception 'FAIL tenant fields %', a; end if;
+  if a->>'plan' <> 'free' or a->>'status' <> 'active' or (a->>'ai_monthly_token_cap')::bigint <> 300000 then raise exception 'FAIL tenant fields %', a; end if;
   checks := checks + 1;
 
   r := public.platform_tenant_overview(period, 'pto-test', 2, 0);

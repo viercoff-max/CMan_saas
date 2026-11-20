@@ -31,8 +31,16 @@ export const nonNeg = (n: unknown) => Math.max(0, Math.floor(Number(n) || 0));
 export const tokensRemaining = (cap: unknown, inputTokens: unknown, outputTokens: unknown): number =>
   Math.max(0, nonNeg(cap) - nonNeg(inputTokens) - nonNeg(outputTokens));
 
+// ---------- legal hold (REVIEW-security-2 H1) ----------
+/** Escalation reasons that put a conversation on a STICKY legal hold (product liability / PROFECO evidence). */
+export const LEGAL_HOLD_REASONS = ["safety", "legal"] as const;
+export const isLegalHoldReason = (r: unknown): boolean => typeof r === "string" && (LEGAL_HOLD_REASONS as readonly string[]).includes(r);
+
 // ---------- tenants (platform-admin list) ----------
+/** SQLite (on-prem, owner-operated) default. Supabase self-serve tenants default to SUPABASE_FREE_TOKEN_CAP. */
 export const TENANT_DEFAULTS = { plan: "free", status: "active", aiMonthlyTokenCap: 2_000_000 } as const;
+/** public.tenants.ai_monthly_token_cap default for new self-serve tenants (migration 20261120013724, REVIEW-security-2 M3). */
+export const SUPABASE_FREE_TOKEN_CAP = 300_000;
 /** tenants.listAll paging: limit 1..200 (default 50), offset >= 0, search trimmed to 100 chars ("" = no filter). */
 export function tenantListArgs(q: { limit?: number; offset?: number; search?: string } = {}): { limit: number; offset: number; search: string } {
   const limit = Math.min(200, Math.max(1, Math.floor(Number(q.limit ?? 50)) || 50));

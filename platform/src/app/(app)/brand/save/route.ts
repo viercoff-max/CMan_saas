@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { getSession, hasRole } from "@/lib/auth";
 import { parseBrandForm, saveBrand, type LogoUpload } from "@/lib/brand/save";
+import { formDataCapped } from "@/lib/security/body";
 import { checkSameOrigin } from "@/lib/security/origin";
 import { limitOr429 } from "@/lib/security/rate-limit";
 import { LOGO_MAX_BYTES } from "@/lib/storage/logo";
@@ -21,10 +22,9 @@ export async function POST(req: Request) {
   if (!hasRole(session.role, "admin")) return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
   const limited = await limitOr429(`brand:${session.tenantId}`, 30, 15 * 60_000); if (limited) return limited;
 
-  const len = Number(req.headers.get("content-length") ?? 0);
-  if (len > MAX_BODY) return NextResponse.json({ ok: false, error: "too_big" }, { status: 413 });
-  let form: FormData;
-  try { form = await req.formData(); } catch { return NextResponse.json({ ok: false, error: "invalid" }, { status: 400 }); }
+  // L6: Content-Length required (411) and the stream is counted while read: never buffers more than MAX_BODY.
+  const form = await formDataCapped(req, MAX_BODY);
+  if (form instanceof Response) return form;
 
   const parsed = parseBrandForm(form);
   if (!parsed.ok) return NextResponse.json({ ok: false, error: "invalid", field: parsed.field }, { status: 400 });

@@ -2,7 +2,7 @@
 // Step 2 "Tu marca" (?step=brand, right after creating the business): logo + main colour, skippable ("Lo hago
 // después"), then the dashboard. It saves through POST /brand/save (admin of the ACTIVE tenant, like /brand).
 import { redirect } from "next/navigation";
-import { getLocale, makeT } from "@/lib/i18n";
+import { getLocale, makeT, type Dict } from "@/lib/i18n";
 import { shellDict } from "@/lib/shell-dict";
 import { getAuthState, hasRole } from "@/lib/auth";
 import { authBackend } from "@/lib/auth/backend";
@@ -11,11 +11,18 @@ import { LocaleProvider } from "@/lib/i18n-client";
 import { logoUrl } from "@/lib/storage/logo";
 import { BrandForm } from "../(app)/brand/BrandForm";
 import { brandDict } from "../(app)/brand/dict";
-import { AuthCard } from "../login/AuthCard";
+import { AuthCard, Notice } from "../login/AuthCard";
 import { OnboardingForm } from "./OnboardingForm";
 import { onboardingLogout } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+// L1 (REVIEW-security-2): every tenant of this user is suspended. No app access and no new business (create_tenant
+// refuses too); the platform operator lifts it.
+const suspendedDict: Dict = {
+  es: { "susp.title": "Cuenta suspendida", "susp.body": "El acceso a tu negocio está suspendido. Si crees que es un error, escribe a soporte de la plataforma." },
+  en: { "susp.title": "Account suspended", "susp.body": "Access to your business is suspended. If you think this is a mistake, contact platform support." },
+};
 
 const KEYS = ["onb.name", "onb.slug", "onb.slugHint", "onb.submit", "onb.errName", "onb.errSlugFormat", "onb.errSlug", "onb.errLimit", "onb.errFailed"];
 
@@ -46,8 +53,20 @@ async function BrandStep() {
 
 export default async function OnboardingPage({ searchParams }: { searchParams: Promise<{ step?: string }> }) {
   if ((await searchParams).step === "brand") return <BrandStep />;
-  if (authBackend() !== "supabase") redirect("/dashboard");
   const st = await getAuthState();
+  if (st.status === "no_tenant" && st.suspended) {
+    const locale = await getLocale();
+    const ts = makeT(suspendedDict, locale), t = makeT(shellDict, locale);
+    return (
+      <AuthCard title={ts("susp.title")}>
+        <Notice tone="error">{ts("susp.body")}</Notice>
+        <form action={onboardingLogout} className="mt-4 text-center">
+          <button type="submit" className="min-h-11 text-sm text-muted underline underline-offset-2 hover:text-ink">{t("onb.logout")}</button>
+        </form>
+      </AuthCard>
+    );
+  }
+  if (authBackend() !== "supabase") redirect("/dashboard");
   if (st.status === "anonymous") redirect("/login?next=%2Fonboarding");
   const t = makeT(shellDict, await getLocale());
   return (

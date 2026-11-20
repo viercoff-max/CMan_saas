@@ -1,6 +1,8 @@
 // "Olvidé mi contraseña" (Supabase mode). Always shows the same message: never says whether the email exists.
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
+import { clientIp } from "@/lib/security/client-ip";
 import { getLocale, makeT } from "@/lib/i18n";
 import { shellDict } from "@/lib/shell-dict";
 import { authBackend } from "@/lib/auth/backend";
@@ -17,7 +19,9 @@ export default async function ForgotPage({ searchParams }: { searchParams: Promi
       import("@/lib/auth/supabase-server"), import("@/lib/auth/supabase-account"), import("@/lib/auth/base-url"),
     ]);
     const base = await appBaseUrl();
-    await requestPasswordReset(await createSupabaseServerClient(), form.get("email"), `${base}/auth/confirm?next=${encodeURIComponent("/login/reset")}`);
+    // M2: per-IP / per-e-mail limit (no e-mail sent when limited; the screen says the same either way).
+    await requestPasswordReset(await createSupabaseServerClient(), form.get("email"), `${base}/auth/confirm?next=${encodeURIComponent("/login/reset")}`,
+      { ip: clientIp(await headers()) });
     redirect("/login/forgot?sent=1");
   }
   return (

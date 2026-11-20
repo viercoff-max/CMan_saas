@@ -17,8 +17,9 @@ export default async function ResetPage({ searchParams }: { searchParams: Promis
       import("@/lib/auth/supabase-server"), import("@/lib/auth/supabase-account"),
     ]);
     const client = await createSupabaseServerClient();
+    // L4: only a fresh recovery session may set a password here; anything else is told to request a new link.
     const r = await updatePassword(client, form.get("password"));
-    if (!r.ok) redirect(`/login/reset?error=${r.error}`);
+    if (!r.ok) redirect(`/login/reset?error=${r.error === "reauth_required" ? "expired" : r.error}`);
     // Sign out everywhere so the recovery session cannot be reused; the user signs in with the new password.
     await client.auth.signOut({ scope: "global" }).catch(() => undefined);
     redirect("/login?notice=password_changed");
