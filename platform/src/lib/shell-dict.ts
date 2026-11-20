@@ -1,6 +1,10 @@
 import type { Dict } from "./i18n-shared";
 export const shellDict: Dict = {
   es: {
+    "nav.brand": "Marca", "nav.billing": "Plan y uso", "nav.group.attention": "Atención", "nav.group.assistant": "Tu asistente", "nav.group.connections": "Conexiones", "nav.group.business": "Tu negocio",
+    "dash.hello": "Hola, {name}", "dash.agentSubtitle": "Tu asistente atiende; tú entras cuando alguien necesita a una persona.", "dash.checklist": "Deja listo tu asistente", "dash.progress": "{done} de {total} pasos listos",
+    "dash.step.brand": "Ponle tu logo y tus colores", "dash.step.team": "Invita a tu equipo", "dash.openInbox": "Ver mensajes",
+    "dash.step.channelsAny": "Conecta un canal para hablar con tus clientes",
     "nav.dashboard": "Inicio", "nav.context": "Contexto", "nav.tone": "Tono", "nav.sources": "Fuentes de datos", "nav.main": "Menú principal", "nav.waiting": "{n} esperando a una persona",
     "nav.inbox": "Mensajes", "nav.addons": "Complementos", "nav.channels": "Canales", "nav.logout": "Salir", "nav.lang": "English",
     "nav.team": "Equipo", "nav.tenant": "Negocio activo", "nav.switch": "Cambiar de negocio", "nav.switchGo": "Cambiar",
@@ -17,7 +21,7 @@ export const shellDict: Dict = {
     "forgot.title": "Recupera tu contraseña", "forgot.subtitle": "Escribe tu correo y te mandamos un enlace para elegir una contraseña nueva.", "forgot.submit": "Enviar enlace",
     "forgot.sent": "Si el correo está registrado, te enviamos un enlace. Revisa tu bandeja de entrada.", "forgot.back": "Volver a entrar",
     "reset.title": "Elige una contraseña nueva", "reset.password": "Contraseña nueva", "reset.submit": "Guardar contraseña", "reset.expired": "El enlace venció o ya se usó. Pide uno nuevo.", "reset.again": "Pedir otro enlace", "reset.hint": "Mínimo 10 caracteres.",
-    "onb.step": "Paso 1", "onb.title": "Tu negocio", "onb.subtitle": "¿Cómo se llama tu negocio? Lo verán tu equipo y tus clientes. Puedes cambiarlo después.",
+    "onb.step": "Paso 1 de 2", "onb.title": "Tu negocio", "onb.subtitle": "¿Cómo se llama tu negocio? Lo verán tu equipo y tus clientes. Puedes cambiarlo después.",
     "onb.name": "Nombre del negocio", "onb.slug": "Dirección corta", "onb.slugHint": "Solo minúsculas, números y guiones. Se usa para identificar tu negocio.",
     "onb.submit": "Continuar", "onb.errSlug": "Esa dirección ya está en uso. Prueba con otra.", "onb.errSlugFormat": "La dirección debe tener de 2 a 63 caracteres: minúsculas, números y guiones.",
     "onb.errName": "Escribe el nombre de tu negocio.", "onb.errLimit": "Llegaste al máximo de negocios por cuenta.", "onb.errFailed": "No pudimos crear tu negocio. Intenta de nuevo.", "onb.logout": "Salir",
@@ -40,6 +44,10 @@ export const shellDict: Dict = {
     "dash.done": "Listo", "dash.open": "Abrir", "dash.start": "Empezar", "dash.review": "Revisar", "dash.next": "Siguiente paso", "dash.optional": "Opcional", "dash.allDone": "Todo listo. Tu asistente ya puede atender a tus clientes.", "dash.demo": "Estás en modo demostración: el asistente NO consulta pedidos reales. Conecta tu tienda para activarlo.", "dash.step": "Paso {n}", "dash.stats.human": "Esperan a una persona", "dash.stats.bot": "Atendidos por el asistente", "dash.stats.resolved": "Resueltos",
   },
   en: {
+    "nav.brand": "Brand", "nav.billing": "Plan and usage", "nav.group.attention": "Attention", "nav.group.assistant": "Your assistant", "nav.group.connections": "Connections", "nav.group.business": "Your business",
+    "dash.hello": "Hi, {name}", "dash.agentSubtitle": "Your assistant helps customers; you step in when someone needs a person.", "dash.checklist": "Get your assistant ready", "dash.progress": "{done} of {total} steps done",
+    "dash.step.brand": "Add your logo and colours", "dash.step.team": "Invite your team", "dash.openInbox": "See messages",
+    "dash.step.channelsAny": "Connect a channel to talk to your customers",
     "nav.dashboard": "Home", "nav.context": "Context", "nav.tone": "Tone", "nav.sources": "Data sources", "nav.main": "Main menu", "nav.waiting": "{n} waiting for a person",
     "nav.inbox": "Messages", "nav.addons": "Add-ons", "nav.channels": "Channels", "nav.logout": "Sign out", "nav.lang": "Español",
     "nav.team": "Team", "nav.tenant": "Active business", "nav.switch": "Switch business", "nav.switchGo": "Switch",
@@ -56,7 +64,7 @@ export const shellDict: Dict = {
     "forgot.title": "Reset your password", "forgot.subtitle": "Type your email and we will send you a link to choose a new password.", "forgot.submit": "Send link",
     "forgot.sent": "If the email is registered, we sent you a link. Check your inbox.", "forgot.back": "Back to sign in",
     "reset.title": "Choose a new password", "reset.password": "New password", "reset.submit": "Save password", "reset.expired": "The link expired or was already used. Ask for a new one.", "reset.again": "Ask for another link", "reset.hint": "At least 10 characters.",
-    "onb.step": "Step 1", "onb.title": "Your business", "onb.subtitle": "What is your business called? Your team and customers will see it. You can change it later.",
+    "onb.step": "Step 1 of 2", "onb.title": "Your business", "onb.subtitle": "What is your business called? Your team and customers will see it. You can change it later.",
     "onb.name": "Business name", "onb.slug": "Short address", "onb.slugHint": "Lowercase letters, numbers and dashes only. Used to identify your business.",
     "onb.submit": "Continue", "onb.errSlug": "That address is taken. Try another one.", "onb.errSlugFormat": "The address needs 2 to 63 characters: lowercase letters, numbers and dashes.",
     "onb.errName": "Type your business name.", "onb.errLimit": "You reached the maximum number of businesses per account.", "onb.errFailed": "We could not create your business. Try again.", "onb.logout": "Sign out",

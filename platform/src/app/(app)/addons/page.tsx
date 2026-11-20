@@ -1,5 +1,4 @@
-import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
+import { requireAdminPage } from "@/components/guards";
 import { getData } from "@/lib/data";
 import { getLocale, makeT } from "@/lib/i18n";
 import { PageHeader } from "@/components/ui";
@@ -8,8 +7,7 @@ import { dict } from "./dict";
 import { AddonsClient } from "./AddonsClient";
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
-  const session = await getSession();
-  if (!session) redirect("/login");
+  const session = await requireAdminPage(); // agents are redirected to /inbox before anything renders
   const locale = await getLocale();
   const t = makeT(dict, locale);
   const { notice } = await searchParams;

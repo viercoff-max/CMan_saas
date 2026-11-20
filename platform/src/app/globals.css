@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+/* Platform default theme. Tenant brands override the brand tokens on a [data-brand] wrapper (see below and
+   src/lib/brand/theme.ts); the neutrals (canvas, surface, ink, muted, line) never change. */
 :root {
   --canvas: #f6f7f9;
   --surface: #ffffff;
@@ -13,6 +15,16 @@
   --on-danger: #ffffff;
   --ok: #15803d;
   --warn: #b45309;
+  --brand-ink: #0f766e;
+  --focus-ring: #0f766e;
+  --brand-soft: #e7f1f0;
+  --brand-accent: #14181f;
+  --on-brand-accent: #ffffff;
+  --menu-bg: #ffffff;
+  --menu-ink: #14181f;
+  --menu-muted: #5d6675;
+  --menu-hover: #f6f7f9;
+  --heading-font: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -28,8 +40,52 @@
     --on-danger: #2a0a06;
     --ok: #4ade80;
     --warn: #fbbf24;
+    --brand-ink: #2dd4bf;
+    --focus-ring: #2dd4bf;
+    --brand-soft: #173a3a;
+    --brand-accent: #2a313c;
+    --on-brand-accent: #ffffff;
+    --menu-bg: #161b22;
+    --menu-ink: #eef1f5;
+    --menu-muted: #9aa4b2;
+    --menu-hover: #1e252e;
   }
 }
+
+/* Tenant theme: the (app) layout and the /brand preview put data-brand + "--tb-*" (light) / "--tbd-*" (dark)
+   custom properties on a wrapper, computed server side from brand_settings (no flash, no client script). */
+[data-brand] {
+  --brand: var(--tb-brand);
+  --brand-dark: var(--tb-brand-dark);
+  --on-brand: var(--tb-on-brand);
+  --brand-ink: var(--tb-brand-ink);
+  --focus-ring: var(--tb-focus-ring);
+  --brand-soft: var(--tb-brand-soft);
+  --brand-accent: var(--tb-brand-accent);
+  --on-brand-accent: var(--tb-on-brand-accent);
+  --menu-bg: var(--tb-menu-bg);
+  --menu-ink: var(--tb-menu-ink);
+  --menu-muted: var(--tb-menu-muted);
+  --menu-hover: var(--tb-menu-hover);
+  --heading-font: var(--tb-heading-font);
+}
+@media (prefers-color-scheme: dark) {
+  [data-brand] {
+    --brand: var(--tbd-brand);
+    --brand-dark: var(--tbd-brand-dark);
+    --on-brand: var(--tbd-on-brand);
+    --brand-ink: var(--tbd-brand-ink);
+    --focus-ring: var(--tbd-focus-ring);
+    --brand-soft: var(--tbd-brand-soft);
+    --brand-accent: var(--tbd-brand-accent);
+    --on-brand-accent: var(--tbd-on-brand-accent);
+    --menu-bg: var(--tbd-menu-bg);
+    --menu-ink: var(--tbd-menu-ink);
+    --menu-muted: var(--tbd-menu-muted);
+    --menu-hover: var(--tbd-menu-hover);
+  }
+}
+
 @theme inline {
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
@@ -43,11 +99,27 @@
   --color-on-danger: var(--on-danger);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
+  --color-brand-ink: var(--brand-ink);
+  --color-focus-ring: var(--focus-ring);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-accent: var(--brand-accent);
+  --color-on-brand-accent: var(--on-brand-accent);
+  --color-menu-bg: var(--menu-bg);
+  --color-menu-ink: var(--menu-ink);
+  --color-menu-muted: var(--menu-muted);
+  --color-menu-hover: var(--menu-hover);
   --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-heading: var(--heading-font);
 }
 body { background: var(--canvas); color: var(--ink); font-family: var(--font-sans); }
+h1, h2 { font-family: var(--heading-font); }
 
-:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+/* A tenant's primary can be too light to read as text (e.g. amber): wherever the brand colour is used AS TEXT or as
+   a focus indicator, use the contrast-checked --brand-ink / --focus-ring instead (unlayered, so it wins over utilities). */
+[data-brand] .text-brand { color: var(--brand-ink); }
+[data-brand] .focus\:border-brand:focus, [data-brand] .focus-visible\:border-brand:focus-visible { border-color: var(--focus-ring); }
+
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 /* iOS zooms into inputs under 16px; keep form controls at 16px on phones. */
 @media (max-width: 767px) {
   input, select, textarea { font-size: 16px !important; }

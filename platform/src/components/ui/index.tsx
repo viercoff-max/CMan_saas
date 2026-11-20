@@ -53,4 +53,15 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 }
 export const inputCls = "w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-base text-ink placeholder:text-muted md:text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30";
 
+/** Horizontal usage bar. `percent` 0..100; `label` names it for screen readers, `valueText` says the value in words. */
+export function Meter({ percent, label, valueText, tone = "brand" }: { percent: number; label: string; valueText: string; tone?: "brand" | "bad" }) {
+  const p = Math.max(0, Math.min(100, Math.round(percent)));
+  return (
+    <div role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={p} aria-valuetext={valueText}
+      className="h-2.5 w-full overflow-hidden rounded-full bg-line">
+      <div className={cx("h-full rounded-full", tone === "bad" ? "bg-danger" : "bg-brand")} style={{ width: `${p}%` }} />
+    </div>
+  );
+}
+
 export { ConfirmDialog } from "./ConfirmDialog";

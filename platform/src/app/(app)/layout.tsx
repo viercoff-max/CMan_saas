@@ -8,6 +8,7 @@ import { getLocale } from "@/lib/i18n";
 import { ensureSeed } from "@/lib/seed";
 import { LocaleProvider } from "@/lib/i18n-client";
 import { Sidebar } from "@/components/Sidebar";
+import { loadShellBrand } from "@/lib/brand/server";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const session = st.session;
   const locale = await getLocale();
   const tenantName = session.tenants.find((t) => t.id === session.tenantId)?.name || session.tenantId;
-  const waiting = (await getData().conversations.countByStatus(session.tenantId)).needs_human;
+  const [counts, brand] = await Promise.all([
+    getData().conversations.countByStatus(session.tenantId),
+    // Tenant theme computed HERE (server side) and applied as an inline style: no flash of the default colours.
+    loadShellBrand(session.tenantId, tenantName),
+  ]);
+  const waiting = counts.needs_human;
 
   async function doLogout() { "use server"; await logout(); redirect("/login"); }
   async function toggleLang() {
@@ -37,9 +43,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <LocaleProvider locale={locale}>
-      <div className="flex min-h-screen flex-col md:flex-row">
+      <div className="flex min-h-screen flex-col md:flex-row" data-brand={brand.style ? "" : undefined} style={(brand.style ?? undefined) as React.CSSProperties | undefined}>
         <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2 focus:text-ink">{locale === "en" ? "Skip to content" : "Saltar al contenido"}</a>
-        <Sidebar tenantName={tenantName} onLogout={doLogout} onToggleLang={toggleLang} waiting={waiting}
+        <Sidebar tenantName={brand.displayName} logoUrl={brand.logoUrl} onLogout={doLogout} onToggleLang={toggleLang} waiting={waiting}
           role={session.role} tenants={session.tenants} activeTenantId={session.tenantId} onSwitchTenant={switchTenant} />
         <main id="main" className="flex-1 p-4 md:p-8"><div className="mx-auto max-w-5xl">{children}</div></main>
       </div>

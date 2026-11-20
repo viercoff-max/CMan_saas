@@ -1,5 +1,5 @@
 "use server";
-// Onboarding step 1 "Tu negocio": public.create_tenant(p_name, p_slug) with the USER's session (the caller becomes
+// Onboarding step 1 "Tu negocio" (then step 2 "Tu marca", see page.tsx): public.create_tenant(p_name, p_slug) with the USER's session (the caller becomes
 // owner; the RPC also creates agent_settings / brand_settings). Supabase mode only.
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
@@ -28,7 +28,7 @@ export async function createTenantAction(_prev: OnboardingState, form: FormData)
   const r = await createTenant(await createSupabaseServerClient(), name.data, slug);
   if (!r.ok) return { error: r.error === "slug_taken" ? "slug_taken" : r.error === "limit" ? "limit" : "failed" };
   (await cookies()).set(ACTIVE_TENANT_COOKIE, r.tenantId, { ...baseCookieOptions(), maxAge: 60 * 60 * 24 * 365 });
-  redirect("/dashboard");
+  redirect("/onboarding?step=brand"); // step 2 "Tu marca" (skippable), then the dashboard
 }
 
 export async function onboardingLogout() {

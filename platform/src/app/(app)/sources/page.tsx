@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
+import { requireAdminPage } from "@/components/guards";
 import { PageHeader } from "@/components/ui";
-import { getSession } from "@/lib/auth";
 import { getLocale, makeT } from "@/lib/i18n";
 import { dict } from "@/lib/context/dict";
 import { getData } from "@/lib/data";
@@ -10,8 +9,7 @@ import { SourcesManager } from "./SourcesManager";
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const s = await getSession();
-  if (!s) redirect("/login");
+  const s = await requireAdminPage(); // agents are redirected to /inbox before anything renders
   const t = makeT(dict, await getLocale());
   // Files uploaded inside a Context section ("Usar un archivo") belong to that section and are managed there.
   const data = getData();

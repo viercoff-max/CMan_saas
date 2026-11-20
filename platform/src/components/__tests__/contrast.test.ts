@@ -18,6 +18,9 @@ const PAIRS: [string, string][] = [
   ["on-brand", "brand"], ["on-brand", "brand-dark"], ["on-danger", "danger"],
   ["ok", "surface"], ["warn", "surface"], ["ok", "canvas"], ["warn", "canvas"],
   ["ink", "surface"], ["muted", "surface"], ["muted", "canvas"], ["brand", "surface"], ["danger", "surface"],
+  // White-label tokens (platform default values; tenant values are checked in src/lib/brand/__tests__/theme.test.ts).
+  ["brand-ink", "surface"], ["brand-ink", "canvas"], ["focus-ring", "surface"], ["ink", "brand-soft"],
+  ["on-brand-accent", "brand-accent"], ["menu-ink", "menu-bg"], ["menu-muted", "menu-bg"], ["menu-ink", "menu-hover"],
 ];
 
 describe.each([["light", light], ["dark", dark]] as const)("WCAG AA contrast (%s)", (_n, v) => {

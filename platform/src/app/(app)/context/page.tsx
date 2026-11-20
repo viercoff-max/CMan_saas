@@ -1,6 +1,5 @@
 import { PageHeader } from "@/components/ui";
-import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
+import { requireAdminPage } from "@/components/guards";
 import { getLocale, makeT } from "@/lib/i18n";
 import { dict } from "@/lib/context/dict";
 import { getData } from "@/lib/data";
@@ -18,8 +17,7 @@ async function fileSize(tenantId: string, stored: string | null): Promise<number
 }
 
 export default async function Page() {
-  const s = await getSession();
-  if (!s) redirect("/login");
+  const s = await requireAdminPage(); // agents are redirected to /inbox before anything renders
   const t = makeT(dict, await getLocale());
   const tenantId = s.tenantId;
   const data = getData();

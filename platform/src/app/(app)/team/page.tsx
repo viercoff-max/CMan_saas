@@ -1,6 +1,6 @@
 // Equipo: members with roles, invitations (Supabase mode). SQLite mode shows the local users read-only.
-import { redirect } from "next/navigation";
-import { getSession, hasRole } from "@/lib/auth";
+import { requireAdminPage } from "@/components/guards";
+import { hasRole } from "@/lib/auth";
 import { authBackend } from "@/lib/auth/backend";
 import { getData } from "@/lib/data";
 import { getLocale, makeT } from "@/lib/i18n";
@@ -11,8 +11,7 @@ import { TeamClient, type TeamRow, type InviteRow } from "./TeamClient";
 export const dynamic = "force-dynamic";
 
 export default async function TeamPage() {
-  const s = await getSession();
-  if (!s) redirect("/login");
+  const s = await requireAdminPage(); // agents are redirected to /inbox before anything renders
   const t = makeT(shellDict, await getLocale());
   const canManage = hasRole(s.role, "admin");
   const supabase = authBackend() === "supabase";
