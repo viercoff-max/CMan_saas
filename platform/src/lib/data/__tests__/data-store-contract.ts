@@ -8,16 +8,19 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DataConflictError, DataValidationError } from "../errors";
-import type { DataStore, SecretKind } from "../types";
+import { AUDIT_GLOBAL_TENANT, type DataStore, type SecretKind } from "../types";
 
 export interface ContractTarget {
   name: string;
   store: () => DataStore;
   /** The stored secret exactly as persisted (ciphertext), to prove nothing is stored in plain text. */
   rawSecret: (tenantId: string, kind: SecretKind, key: string) => Promise<string | null>;
-  /** Adds a team member to a tenant, or undefined when the target cannot create users (members checks skipped). */
-  addMember?: (tenantId: string, email: string, name: string) => Promise<void>;
+  /** Adds a team member to a tenant (returns its user id), or undefined when the target cannot create users. */
+  addMember?: (tenantId: string, email: string, name: string) => Promise<string>;
+  /** Creates two members of `tenantId` and makes ONLY the first a platform admin (undefined: checks skipped). */
+  makePlatformAdmin?: (tenantId: string) => Promise<{ admin: string; other: string }>;
 }
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const PURGE_NOOP = { cutoff: "2999-01-01T00:00:00.000Z", maskCutoff: "2999-01-01T00:00:00.000Z", maskedBody: "[masked]" };
 /** Valid as a SQLite tenant id AND as a Supabase tenant slug. */
@@ -117,6 +120,8 @@ export function defineDataStoreContract(t: ContractTarget): void {
         expect(await data.audit.find(A, { action: "test.action" })).toBeNull();
         expect(await data.audit.list(A)).toEqual([]);
         expect((await data.usage.get(A)).inputTokens).toBe(0);
+        expect(await data.usage.remaining(A)).toBe(2_000_000); // B's 150 tokens never count against A's budget
+        expect(await data.usage.remaining(B)).toBe(2_000_000 - 150);
         expect(await data.limiter.countLookupFailures(A, 0)).toBe(0);
         expect(await data.limiter.countLookupFailures(A, 0, { orderHash: "order-hash-b" })).toBe(0);
         expect(await data.retention.findCustomerConversations(A, "whatsapp", "5215500000000")).toEqual([]);
@@ -190,6 +195,13 @@ export function defineDataStoreContract(t: ContractTarget): void {
       it("cross-tenant lookups are explicit and exact", async () => {
         expect(await data.channels.findTenantByExternalId("whatsapp", `phone-${B}`)).toBe(B);
         expect(await data.channels.findTenantByExternalId("whatsapp", `phone-${A}`)).toBeNull();
+        // Webhook routing ids: B's id routes to B only; A has no row (null) and never sees B's id.
+        const bHook = (await data.channels.get(B, "whatsapp")).webhookId;
+        expect(bHook).toMatch(UUID_RE);
+        expect(await data.channels.findByWebhookId("whatsapp", bHook!)).toEqual({ tenantId: B, channel: "whatsapp" });
+        expect((await data.channels.get(A, "whatsapp")).webhookId).toBeNull();
+        expect((await data.tenants.get(A))?.id).toBe(A);
+        expect((await data.tenants.get(B))?.name).toBe("Tenant B");
         expect((await data.retention.tenantIds())).toEqual(expect.arrayContaining([A, B]));
       });
     });
@@ -212,7 +224,7 @@ export function defineDataStoreContract(t: ContractTarget): void {
         await data.channels.save(T, "telegram", { status: "connected", publicInfo: { externalId: `bot-${T}` } });
         await data.secrets.set(T, "channel", "telegram", { botToken: "123:ABC" });
         const ch = await data.channels.get(T, "telegram");
-        expect(ch).toEqual({ channel: "telegram", status: "connected", publicInfo: { externalId: `bot-${T}` } });
+        expect(ch).toEqual({ channel: "telegram", status: "connected", publicInfo: { externalId: `bot-${T}` }, webhookId: expect.stringMatching(UUID_RE) });
         expect(JSON.stringify(ch)).not.toContain("123:ABC");
         await data.channels.save(T, "telegram", { status: "disconnected", publicInfo: {} });
         expect(await data.secrets.get(T, "channel", "telegram")).toEqual({ botToken: "123:ABC" }); // channels keep them...
@@ -240,6 +252,115 @@ export function defineDataStoreContract(t: ContractTarget): void {
         await data.channels.save(a, "messenger", { status: "disconnected", publicInfo: { externalId: ext } });
         await data.channels.save(b, "messenger", { status: "connected", publicInfo: { externalId: ext } });
         expect(await data.channels.findTenantByExternalId("messenger", ext)).toBe(b);
+      });
+    });
+
+    describe("channel webhook routing ids (Telegram)", () => {
+      it("one stable public id per channel row; findByWebhookId routes connected accounts only", async () => {
+        const a = await newTenant("wha"), b = await newTenant("whb");
+        expect((await data.channels.get(a, "telegram")).webhookId).toBeNull(); // no row yet
+        await data.channels.save(a, "telegram", { status: "connected", publicInfo: { externalId: `bot-${a}` } });
+        const hookA = (await data.channels.get(a, "telegram")).webhookId!;
+        expect(hookA).toMatch(UUID_RE);
+        await data.channels.save(a, "telegram", { status: "connected", publicInfo: { externalId: `bot-${a}`, displayName: "Bot A" } });
+        expect((await data.channels.get(a, "telegram")).webhookId).toBe(hookA); // saves never rotate it
+        await data.channels.save(b, "telegram", { status: "connected", publicInfo: { externalId: `bot-${b}` } });
+        const hookB = (await data.channels.get(b, "telegram")).webhookId!;
+        expect(hookB).not.toBe(hookA);
+
+        expect(await data.channels.findByWebhookId("telegram", hookA)).toEqual({ tenantId: a, channel: "telegram" });
+        expect(await data.channels.findByWebhookId("telegram", hookA.toUpperCase())).toEqual({ tenantId: a, channel: "telegram" });
+        expect(await data.channels.findByWebhookId("telegram", hookB)).toEqual({ tenantId: b, channel: "telegram" });
+        expect(await data.channels.findByWebhookId("whatsapp", hookA)).toBeNull(); // other channel
+        expect(await data.channels.findByWebhookId("telegram", randomUUID())).toBeNull();
+        for (const bad of ["", "not-a-uuid", `${hookA}/../x`, "x' OR 1=1 --"]) expect(await data.channels.findByWebhookId("telegram", bad)).toBeNull();
+
+        await data.channels.save(a, "telegram", { status: "disconnected", publicInfo: {} });
+        expect(await data.channels.findByWebhookId("telegram", hookA)).toBeNull(); // fail closed once disconnected
+        expect((await data.channels.get(a, "telegram")).webhookId).toBe(hookA);
+        expect(await data.channels.findByWebhookId("telegram", hookB)).toEqual({ tenantId: b, channel: "telegram" });
+      });
+    });
+
+    describe("tenants, platform admins and AI budget", () => {
+      it("tenants.get returns the public tenant record with plan defaults", async () => {
+        const T = await newTenant("tg", "Tienda G");
+        const t1 = await data.tenants.get(T);
+        expect(t1).toMatchObject({ id: T, name: "Tienda G", plan: "free", status: "active", aiMonthlyTokenCap: 2_000_000 });
+        expect(t1!.slug).toMatch(/^tg-/);
+        expect(Number.isNaN(Date.parse(t1!.createdAt))).toBe(false);
+        expect(await data.tenants.get(randomUUID())).toBeNull();
+      });
+
+      it("tenants.listAll: counts per tenant (this month only), search, paging, literal wildcards", async () => {
+        const tag = `lst${randomUUID().slice(0, 8)}`;
+        const a = await data.tenants.ensure(tenantKey(`${tag}a`), `List ${tag} A`);
+        const b = await data.tenants.ensure(tenantKey(`${tag}b`), `List ${tag} B`);
+        const c = await data.tenants.ensure(tenantKey(`${tag}c`), `Other ${tag} C`);
+        if (t.addMember) await t.addMember(a, `m-${randomUUID()}@example.test`, "Miembro A");
+        await data.conversations.getOrCreate(a, "telegram", "x1", "Uno");
+        await data.conversations.getOrCreate(a, "whatsapp", "x2", "Dos");
+        await data.conversations.getOrCreate(a, "simulator", "s1", "Sim"); // not counted
+        const old = await data.conversations.getOrCreate(a, "telegram", "x3", "Viejo");
+        await data.conversations.setTimestamps(a, old.id, { lastMessageAt: OLD }); // other month: not counted
+        await data.conversations.getOrCreate(b, "telegram", "y1", "B");
+        await data.channels.save(a, "telegram", { status: "connected", publicInfo: { externalId: `bot-${a}` } });
+        await data.channels.save(a, "messenger", { status: "disconnected", publicInfo: {} });
+        await data.usage.record(a, { inputTokens: 100, outputTokens: 20 });
+        await data.usage.record(a, { inputTokens: 999 }, new Date("2000-01-15T00:00:00Z")); // other month
+        await data.usage.record(b, { inputTokens: 4, outputTokens: 1 });
+
+        const all = await data.tenants.listAll({ search: tag });
+        expect(all.total).toBe(3);
+        expect(all.period).toMatch(/^\d{4}-\d{2}-01$/);
+        expect(all.items.map((x) => x.id).sort()).toEqual([a, b, c].sort());
+        const ra = all.items.find((x) => x.id === a)!;
+        expect(ra).toMatchObject({ name: `List ${tag} A`, plan: "free", status: "active", aiMonthlyTokenCap: 2_000_000, conversationsThisMonth: 2, connectedChannels: 1, aiTokensThisMonth: 120 });
+        if (t.addMember) expect(ra.members).toBe(1);
+        expect(all.items.find((x) => x.id === b)).toMatchObject({ conversationsThisMonth: 1, connectedChannels: 0, aiTokensThisMonth: 5, members: 0 });
+        expect(all.items.find((x) => x.id === c)).toMatchObject({ conversationsThisMonth: 0, connectedChannels: 0, aiTokensThisMonth: 0, members: 0 });
+
+        expect((await data.tenants.listAll({ search: `LIST ${tag}` })).total).toBe(2); // case-insensitive
+        expect((await data.tenants.listAll({ search: `${tag}%` })).total).toBe(0); // % is literal
+        expect((await data.tenants.listAll({ search: `${tag.slice(0, 3)}_${tag.slice(4)}` })).total).toBe(0); // _ is literal
+        const p1 = await data.tenants.listAll({ search: tag, limit: 2 });
+        const p2 = await data.tenants.listAll({ search: tag, limit: 2, offset: 2 });
+        expect(p1.total).toBe(3);
+        expect(p1.items).toHaveLength(2);
+        expect(p2.items).toHaveLength(1);
+        expect([...p1.items, ...p2.items].map((x) => x.id).sort()).toEqual([a, b, c].sort());
+        // Another month: only that month's usage counts.
+        const jan = await data.tenants.listAll({ search: tag, now: new Date("2000-01-20T00:00:00Z") });
+        expect(jan.period).toBe("2000-01-01");
+        expect(jan.items.find((x) => x.id === a)?.aiTokensThisMonth).toBe(999);
+      });
+
+      it("usage.remaining = cap - (input + output) this month, never negative, 0 for unknown tenants", async () => {
+        const T = await newTenant("rem");
+        expect(await data.usage.remaining(T)).toBe(2_000_000);
+        await data.usage.record(T, { inputTokens: 1500, outputTokens: 500 });
+        expect(await data.usage.remaining(T)).toBe(1_998_000);
+        await data.usage.record(T, { inputTokens: 3_000_000, outputTokens: 1 }, new Date("2000-01-02T00:00:00Z"));
+        expect(await data.usage.remaining(T, new Date("2000-01-20T00:00:00Z"))).toBe(0);
+        expect(await data.usage.remaining(T)).toBe(1_998_000);
+        expect(await data.usage.remaining(randomUUID())).toBe(0);
+      });
+
+      it("platformAdmins.isPlatformAdmin is true only for configured admins", async () => {
+        const T = await newTenant("pa");
+        expect(await data.platformAdmins.isPlatformAdmin(randomUUID())).toBe(false);
+        expect(await data.platformAdmins.isPlatformAdmin("")).toBe(false);
+        expect(await data.platformAdmins.isPlatformAdmin("not-a-uuid")).toBe(false);
+        if (!t.makePlatformAdmin) return;
+        const { admin, other } = await t.makePlatformAdmin(T);
+        expect(await data.platformAdmins.isPlatformAdmin(admin)).toBe(true);
+        expect(await data.platformAdmins.isPlatformAdmin(other)).toBe(false);
+      });
+
+      it("global audit rows (no tenant) are accepted and never show up in a tenant's log", async () => {
+        const T = await newTenant("ag");
+        await data.audit.log(AUDIT_GLOBAL_TENANT, "anonymous", "auth.login_failed", `hash-${T}`);
+        expect(await data.audit.list(T)).toEqual([]);
       });
     });
 

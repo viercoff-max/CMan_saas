@@ -1,12 +1,10 @@
 // Context sections, section links, sources and chunks (Supabase).
-// sources.storage_path holds the file path (SQLite: file_path). The file BYTES still live on the local disk
-// (DATA_DIR/uploads) in SQLite mode; moving them to the "tenant-files" Storage bucket is stage 4.
-// TODO(stage 4, Supabase Storage): upload/read file sources via storage.from("tenant-files") at "<tenant_id>/...",
-// then allow kind "file" in sources.create. Until then creating a file source fails loudly (see below) so no row
-// ever points at bytes that a serverless instance does not have.
+// sources.storage_path holds the file path (SQLite: file_path): the object path "<tenant_id>/<key>" in the private
+// "tenant-files" Storage bucket, written by src/lib/storage (getFileStore().put returns it). sources.create refuses a
+// file path that does not start with THIS tenant's id, so a row can never point at another tenant's object.
 import { nowIso } from "../../ids";
 import { CONTEXT_SECTION_KEYS, type ContextSectionKey } from "../../types";
-import { DataBackendUnsupportedError, DataValidationError } from "../errors";
+import { DataValidationError } from "../errors";
 import type { ChunksRepo, SectionRow, SectionsRepo, SourcesRepo, SourceText } from "../types";
 import { isUuid, scoped, type Db, type Row, type Scoped } from "./client";
 import { allRows, cap, mapChunk, mapSectionRow, mapSource, one, rows, run } from "./map";
@@ -115,9 +113,10 @@ export function sourcesRepo(db: Db): SourcesRepo {
     async create(tenantId, src) {
       const s = scoped(db, tenantId);
       if (src.kind === "file") {
-        throw new DataBackendUnsupportedError(
-          "File sources are not available with DATA_BACKEND=supabase yet: file bytes must move to Supabase Storage first (stage 4).",
-        );
+        const p = String(src.filePath ?? "");
+        // Server-built object path: "<this tenant uuid>/<key>", no traversal, within the column CHECK (500).
+        if (!p.startsWith(`${s.tenantId}/`) || p.length > 500 || p.split("/").some((seg) => !seg || seg === "." || seg === ".."))
+          throw new DataValidationError("filePath");
       }
       const r = await one(s.from("sources").insert({ kind: src.kind, title: cap(src.title, 300), url: src.url ?? null, storage_path: src.filePath ?? null }).select("id").maybeSingle(), "sources.create");
       const created = r ? await get(s, r.id as string) : null;

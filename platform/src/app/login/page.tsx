@@ -65,11 +65,16 @@ async function SupabaseLogin({ searchParams }: { searchParams: Promise<Search> }
   const nextPath = safeNext(next);
   async function action(form: FormData) {
     "use server";
-    const [{ createSupabaseServerClient }, { signIn }] = await Promise.all([
-      import("@/lib/auth/supabase-server"), import("@/lib/auth/supabase-account"),
+    const [{ createSupabaseServerClient }, { signIn }, { listMemberships }, { auditSignIn }] = await Promise.all([
+      import("@/lib/auth/supabase-server"), import("@/lib/auth/supabase-account"), import("@/lib/auth/supabase-session"),
+      import("@/lib/audit-events"),
     ]);
     const back = safeNext(form.get("next"));
-    const { ok } = await signIn(await createSupabaseServerClient(), { email: form.get("email"), password: form.get("password") });
+    const client = await createSupabaseServerClient();
+    const { ok, userId } = await signIn(client, { email: form.get("email"), password: form.get("password") });
+    // Audit (server side, hashed IP only; never the email). Memberships through the user's own session (RLS).
+    const tenantIds = ok && userId ? (await listMemberships(client, userId).catch(() => [])).map((m) => m.id) : [];
+    await auditSignIn({ ok, userId, tenantIds }, clientIp(await headers()));
     redirect(ok ? back : withNext("/login?error=1", back));
   }
   const noticeKey = notice ? NOTICES[notice] : undefined;

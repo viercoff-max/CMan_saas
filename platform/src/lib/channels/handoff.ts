@@ -1,10 +1,9 @@
-// Handoff notification. Local: writes an email-style text file to DATA_DIR/outbox/ (OUTBOX_DIR from db.ts).
+// Handoff notification. Writes an email-style text file to the outbox (lib/storage/outbox.ts): DATA_DIR/outbox/ in
+// SQLite mode, "<tenantId>/outbox/" in the private tenant-files bucket in Supabase mode. Retention purges both.
 // TODO(production): send through SMTP / Resend to settings.handoffEmail instead of (or in addition to) the outbox file.
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { getData } from "../data";
-import { OUTBOX_DIR } from "../db";
 import { maskEmailsInText } from "../engine/text";
+import { writeOutboxFile } from "../storage/outbox";
 
 const URGENT = new Set(["safety", "legal"]);
 const SENDER_LABEL = { customer: "Cliente", bot: "Asistente", agent: "Equipo" } as const;
@@ -47,10 +46,7 @@ export async function notifyHandoff(tenantId: string, conversationId: string, re
       to: settings.handoffEmail, reason, customerName: conv.customerName, channel: conv.channel,
       link: `${base}/inbox?c=${conv.id}`, messages: msgs,
     });
-    const dir = OUTBOX_DIR;
-    await mkdir(dir, { recursive: true });
-    const file = `${new Date().toISOString().replace(/[:.]/g, "-")}-${conv.id}.txt`;
-    await writeFile(path.join(dir, file), text, "utf8");
+    const file = await writeOutboxFile(tenantId, conv.id, text);
     console.info(`[handoff] outbox file written: ${file} reason=${reason} channel=${conv.channel}`);
   } catch {
     console.error("[handoff] could not write outbox file");

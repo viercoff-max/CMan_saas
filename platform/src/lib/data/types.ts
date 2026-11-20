@@ -13,10 +13,56 @@ import type {
 
 export type DataBackend = "sqlite" | "supabase";
 
+/**
+ * Pseudo tenant id for audit rows that belong to no tenant (failed sign-in of an unknown email, platform events).
+ * SQLite stores it as the tenant_id text; Supabase stores tenant_id NULL (only the service role can read those rows).
+ */
+export const AUDIT_GLOBAL_TENANT = "system";
+
 // ---------------- tenants / members / users ----------------
-export interface TenantInfo { id: string; name: string }
+export type TenantPlan = "free" | "pro" | "business";
+export type TenantStatus = "active" | "suspended" | "deleted";
+/** Public tenant record (Supabase: public.tenants; SQLite: tenants, where slug falls back to the id). */
+export interface TenantInfo {
+  id: string; name: string; slug: string; plan: TenantPlan; status: TenantStatus;
+  /** Monthly AI token budget (input + output tokens). */
+  aiMonthlyTokenCap: number;
+  createdAt: string;
+}
+/** One row of the platform-admin tenant list: the tenant plus this month's counts. */
+export interface TenantOverview extends TenantInfo {
+  members: number;
+  /** Real-customer conversations (simulator excluded) with a message since the first day of the month (UTC). */
+  conversationsThisMonth: number;
+  connectedChannels: number;
+  /** input + output tokens of the month (ai_usage). */
+  aiTokensThisMonth: number;
+}
+export interface TenantListQuery {
+  /** Page size, clamped to 1..200 (default 50). */
+  limit?: number;
+  /** Rows to skip (default 0). */
+  offset?: number;
+  /** Case-insensitive substring of the name or slug (LIKE wildcards are literal). Max 100 chars. */
+  search?: string;
+  /** Picks the month of the counts (default: now). */
+  now?: Date;
+}
+export interface TenantListPage {
+  items: TenantOverview[];
+  /** Tenants matching `search` (all pages). */
+  total: number;
+  /** "YYYY-MM-01" of the counted month. */
+  period: string;
+}
 export interface TenantsRepo {
   get(tenantId: string): Promise<TenantInfo | null>;
+  /**
+   * CROSS-TENANT by design (platform-admin screen only). The CALLER must first check
+   * `platformAdmins.isPlatformAdmin(session.userId)`; this method does not know who is asking.
+   * Newest tenants first. Supabase: one RPC (platform_tenant_overview, service_role only); SQLite: one query.
+   */
+  listAll(q?: TenantListQuery): Promise<TenantListPage>;
   /**
    * Bootstrap only (first-run seed, local demo, tests). Creates the tenant when missing and returns ITS id:
    * SQLite uses `tenantIdOrSlug` as the (text) id; Supabase treats it as the tenant slug (or an existing uuid) and
@@ -42,6 +88,15 @@ export interface UsersRepo {
   get(userId: string): Promise<UserProfile | null>;
   create(u: { id?: string; tenantId: string; email: string; name: string; passwordHash: string; role?: MemberRole }): Promise<string>;
   setPasswordHash(userId: string, passwordHash: string): Promise<boolean>;
+}
+
+/**
+ * Platform operators (not tenant members). Supabase: public.platform_admins (rows added by the owner in SQL).
+ * SQLite: no table; the comma-separated env PLATFORM_ADMIN_EMAILS is matched against the local user's email.
+ */
+export interface PlatformAdminsRepo {
+  /** CROSS-TENANT (global role). False for unknown / malformed ids. */
+  isPlatformAdmin(userId: string): Promise<boolean>;
 }
 
 // ---------------- settings / brand ----------------
@@ -179,6 +234,13 @@ export interface ChannelsRepo {
   save(tenantId: string, channel: ChannelAccountKey, v: { status: ChannelAccount["status"]; publicInfo?: Record<string, unknown> }): Promise<void>;
   /** CROSS-TENANT by design (webhook routing): which tenant has this external id connected. */
   findTenantByExternalId(channel: ChannelAccountKey, externalId: string): Promise<string | null>;
+  /**
+   * CROSS-TENANT by design (Telegram webhook routing: /api/webhooks/telegram/<webhookId>). The webhookId is the
+   * public random id of the channel row (`ChannelAccount.webhookId`, a uuid). Only CONNECTED accounts match;
+   * anything else (unknown, malformed, other channel, disconnected) is null. It is NOT a secret: the route must
+   * still check the Telegram secret header against the encrypted secret (lib/channels/telegram-secret.ts).
+   */
+  findByWebhookId(channel: ChannelAccountKey, webhookId: string): Promise<{ tenantId: string; channel: ChannelAccountKey } | null>;
 }
 export type SecretKind = "channel" | "addon";
 export interface SecretsRepo {
@@ -192,7 +254,10 @@ export interface SecretsRepo {
 // ---------------- audit / usage ----------------
 export interface AuditQuery { actor?: string; action?: string; detail?: string }
 export interface AuditRepo {
-  /** Never put PII (emails, message text) in detail: counts, hashes and ids only. */
+  /**
+   * Never put PII (emails, message text, tokens) in detail: counts, hashes and ids only.
+   * `tenantId` may be AUDIT_GLOBAL_TENANT ("system") for events that belong to no tenant.
+   */
   log(tenantId: string, actor: string, action: string, detail?: string): Promise<void>;
   /** First matching row's detail in this tenant, or null. */
   find(tenantId: string, q: AuditQuery): Promise<string | null>;
@@ -204,6 +269,11 @@ export interface UsageRepo {
   /** Adds to the month of `at` (period = first day of that month, UTC, "YYYY-MM-01"). */
   record(tenantId: string, v: { requests?: number; inputTokens?: number; outputTokens?: number }, at?: Date): Promise<UsageRow>;
   get(tenantId: string, period?: string): Promise<UsageRow>;
+  /**
+   * Tokens left this month: tenants.aiMonthlyTokenCap - (inputTokens + outputTokens) of the month of `now`,
+   * never negative. 0 when the tenant does not exist (fail closed).
+   */
+  remaining(tenantId: string, now?: Date): Promise<number>;
 }
 
 // ---------------- abuse limits ----------------
@@ -255,6 +325,7 @@ export interface RetentionRepo {
 export interface DataStore {
   readonly backend: DataBackend;
   tenants: TenantsRepo;
+  platformAdmins: PlatformAdminsRepo;
   members: MembersRepo;
   users: UsersRepo;
   settings: SettingsRepo;

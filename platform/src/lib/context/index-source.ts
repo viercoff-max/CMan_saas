@@ -1,12 +1,14 @@
 // Indexes one source (link or uploaded file): extract text -> save content_text -> re-chunk. Never throws.
-import fs from "node:fs/promises";
+// File sources are read through the FileStore (lib/storage): only a path inside THIS tenant's folder is ever read.
 import { getData } from "../data";
+import { getFileStore, keyFromStored } from "../storage";
 import { chunkText } from "./chunk";
 import { extFromContentType, extOf, extractFromBuffer, googleExportUrl, htmlToText, MAX_UPLOAD_BYTES } from "./extract";
 import { fetchSafe, UnsafeUrlError } from "./fetch-safe";
 import { refreshSourceSections } from "./section-index";
 import { resolveUploadPath } from "./upload-path";
 
+/** @deprecated local-disk path helper kept for tests; app code uses the FileStore. */
 export { resolveUploadPath };
 
 const MAX_TEXT = 400_000;
@@ -48,11 +50,12 @@ export async function indexSource(tenantId: string, sourceId: string): Promise<I
       // Google sends a sign-in HTML page when the doc is not shared publicly.
       if (g && /<html|accounts\.google\.com/i.test(res.body.subarray(0, 2000).toString("utf8"))) throw new Error("google_private");
     } else {
-      const full = src.filePath ? resolveUploadPath(tenantId, src.filePath) : null;
-      if (!full) throw new Error("file_missing");
-      const buf = await fs.readFile(full).catch(() => { throw new Error("file_missing"); });
-      if (buf.length > MAX_UPLOAD_BYTES) throw new Error("file_too_large");
-      text = await extractFromBuffer(buf, extOf(full));
+      const key = keyFromStored(tenantId, src.filePath);
+      if (!key) throw new Error("file_missing");
+      const bytes = await getFileStore().get(tenantId, key).catch(() => null);
+      if (!bytes) throw new Error("file_missing");
+      if (bytes.byteLength > MAX_UPLOAD_BYTES) throw new Error("file_too_large");
+      text = await extractFromBuffer(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength), extOf(key));
     }
     text = text.slice(0, MAX_TEXT).trim();
     if (!text) throw new Error("empty");

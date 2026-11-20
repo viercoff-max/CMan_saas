@@ -8,7 +8,7 @@ import { conversationsRepo, messagesRepo } from "./inbox";
 import { addonsRepo, channelsRepo, secretsRepo } from "./integrations";
 import { chunksRepo, sectionsRepo, sourcesRepo } from "./knowledge";
 import { auditRepo, limiterRepo, rateLimitsRepo, usageRepo } from "./ops";
-import { membersRepo, tenantsRepo, usersRepo } from "./people";
+import { membersRepo, platformAdminsRepo, tenantsRepo, usersRepo } from "./people";
 import { retentionRepo } from "./retention";
 import { brandRepo, settingsRepo } from "./settings";
 
@@ -16,7 +16,7 @@ import { brandRepo, settingsRepo } from "./settings";
 export function createSupabaseStore(db: Db = createServiceClient()): DataStore {
   return {
     backend: "supabase",
-    tenants: tenantsRepo(db), members: membersRepo(db), users: usersRepo(db),
+    tenants: tenantsRepo(db), platformAdmins: platformAdminsRepo(db), members: membersRepo(db), users: usersRepo(db),
     settings: settingsRepo(db), brand: brandRepo(db),
     sections: sectionsRepo(db), sources: sourcesRepo(db), chunks: chunksRepo(db),
     conversations: conversationsRepo(db), messages: messagesRepo(db),

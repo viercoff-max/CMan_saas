@@ -32,13 +32,13 @@ export async function signUp(client: SupabaseClient, input: { email: unknown; pa
   return { ok: false, error: "failed" };
 }
 
-/** Wrong email, wrong password and unconfirmed email all look the same to the caller. */
-export async function signIn(client: SupabaseClient, input: { email: unknown; password: unknown }): Promise<{ ok: boolean }> {
+/** Wrong email, wrong password and unconfirmed email all look the same to the caller. `userId` only on success (audit). */
+export async function signIn(client: SupabaseClient, input: { email: unknown; password: unknown }): Promise<{ ok: boolean; userId?: string }> {
   const email = Email.safeParse(input.email);
   const pw = typeof input.password === "string" ? input.password.slice(0, 1024) : "";
   if (!email.success || !pw) return { ok: false };
   const { data, error } = await client.auth.signInWithPassword({ email: email.data, password: pw });
-  return { ok: !error && !!data?.user };
+  return !error && data?.user ? { ok: true, userId: data.user.id } : { ok: false };
 }
 
 /** Always "ok": the screen says "si el correo existe, te enviamos un enlace". */

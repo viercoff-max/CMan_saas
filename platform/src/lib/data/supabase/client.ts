@@ -41,10 +41,27 @@ export interface Table {
   delete(options?: { count?: "exact" }): Query;
 }
 export interface AuthUser { id: string; email?: string | null; user_metadata?: Record<string, unknown> | null }
+
+/** The subset of supabase-js Storage (storage-js) used by src/lib/storage/supabase.ts. Same names and semantics. */
+export interface StorageError { message?: string; statusCode?: string; status?: number }
+export interface StorageObject {
+  name: string; id: string | null; updated_at?: string | null; created_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+export interface StorageBucketApi {
+  upload(path: string, body: Uint8Array, options?: { contentType?: string; upsert?: boolean; cacheControl?: string }):
+    PromiseLike<{ data: { path: string } | null; error: StorageError | null }>;
+  download(path: string): PromiseLike<{ data: Blob | null; error: StorageError | null }>;
+  remove(paths: string[]): PromiseLike<{ data: unknown; error: StorageError | null }>;
+  list(prefix?: string, options?: { limit?: number; offset?: number; search?: string; sortBy?: { column: string; order: "asc" | "desc" } }):
+    PromiseLike<{ data: StorageObject[] | null; error: StorageError | null }>;
+  getPublicUrl(path: string): { data: { publicUrl: string } };
+}
 export interface Db {
   from(table: string): Table;
   rpc(fn: string, args?: Row): PromiseLike<DbResult>;
   auth: { admin: { getUserById(id: string): PromiseLike<{ data: { user: AuthUser | null } | null; error: DbError | null }> } };
+  storage: { from(bucket: string): StorageBucketApi };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

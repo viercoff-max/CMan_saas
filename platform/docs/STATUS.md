@@ -129,3 +129,18 @@ Stage 3 (2026-11-19). Code: `src/lib/auth.ts`, `src/lib/auth/`, `src/proxy.ts`, 
   - per-brand Meta/Shopify OAuth;
   - billing;
   - an add-on registry so other brands can plug in stores other than Shopify (`src/lib/connectors/registry.ts` is the hook point).
+
+## Wave 1: foundation for wave 2 (2026-11-19)
+- **Storage (stage 4)**: `src/lib/storage` FileStore with local-disk and Supabase Storage backends (by `DATA_BACKEND`).
+  Uploads, section files, source indexing/deletion, the Context page and the handoff outbox (+ its retention purge and
+  per-customer deletion) use it. File sources now work in Supabase mode (`storage_path`, tenant-prefixed, checked).
+  `uploadLogo` for branding (png/jpeg/webp, 2 MB, magic bytes, no SVG) and a local `/api/brand-assets/...` route.
+- **Data layer**: `tenants.get` (slug/plan/status/cap/createdAt), cross-tenant `tenants.listAll` (counts for the
+  platform-admin screen), `platformAdmins.isPlatformAdmin`, `usage.remaining`, `ChannelAccount.webhookId` +
+  `channels.findByWebhookId` (Telegram routing), global audit rows. Telegram secret helpers in `lib/channels/telegram-secret.ts`.
+- **Auth**: /team shows real names and emails in Supabase mode (server-side directory after the membership check);
+  audit rows for Supabase sign-in, invitations, role changes and removals; `ensureSeed` is a no-op in Supabase mode.
+- **Migration written, NOT applied**: `supabase/migrations/20261120090000_platform_tenant_overview.sql` (RPC
+  `platform_tenant_overview`, service_role only) + test `supabase/tests/platform_tenant_overview.sql`. Apply it before
+  using `tenants.listAll` against Supabase.
+- Interface for wave 2: docs/ARCHITECTURE.md "Wave 1 additions" and "Storage".

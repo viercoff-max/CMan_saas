@@ -2,12 +2,11 @@
 // when "Usar un archivo" is on and the file is indexed) plus the Data sources linked to it.
 // Linked-source chunks carry both sectionKey and sourceId, so deleting the source still removes them.
 // A source used by any section has no general (section-less) chunks, so nothing is retrieved twice.
-import fs from "node:fs/promises";
 import { getData } from "../data";
+import { getFileStore, keyFromStored } from "../storage";
 import type { ContextSectionKey } from "../types";
 import { chunkText } from "./chunk";
 import { dict } from "./dict";
-import { resolveUploadPath } from "./upload-path";
 import { getEffectiveSectionContent, type SectionChunk } from "./section-repo";
 
 /**
@@ -54,17 +53,16 @@ export async function deleteSourceAndLinks(tenantId: string, sourceId: string): 
   const data = getData();
   const s = await data.sources.getText(tenantId, sourceId);
   if (!s) return false;
-  if (s.filePath) {
-    const full = resolveUploadPath(tenantId, s.filePath);
-    if (full) await fs.rm(full, { force: true }).catch(() => undefined);
-  }
+  // The stored file (FileStore: local disk or Supabase Storage); only a path inside this tenant's folder is touched.
+  const key = keyFromStored(tenantId, s.filePath);
+  if (key) await getFileStore().remove(tenantId, key).catch(() => console.error("[context] could not delete a source file"));
   const keys = await data.sections.removeSourceReferences(tenantId, sourceId);
   await data.sources.delete(tenantId, sourceId);
   for (const k of keys) await reindexSection(tenantId, k);
   return true;
 }
 
-/** Same as deleteSourceAndLinks without touching the disk (demo rows, tests). */
+/** Same as deleteSourceAndLinks without touching the stored file (demo rows, tests). */
 export async function deleteSourceRowAndLinks(tenantId: string, sourceId: string): Promise<void> {
   const data = getData();
   const keys = await data.sections.removeSourceReferences(tenantId, sourceId);

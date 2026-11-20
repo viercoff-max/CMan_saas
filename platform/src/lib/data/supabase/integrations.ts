@@ -6,7 +6,7 @@
 import { decryptJson, encryptJson } from "../../crypto";
 import { nowIso } from "../../ids";
 import type { AddonsRepo, ChannelsRepo, SecretsRepo } from "../types";
-import { scoped, type Db, type Scoped } from "./client";
+import { isUuid, scoped, type Db, type Scoped } from "./client";
 import { externalIdOf, mapAddon, mapChannel, one, rows, run } from "./map";
 
 const clearSecret = (s: Scoped, kind: string, key: string, ctx: string) =>
@@ -32,7 +32,7 @@ export function addonsRepo(db: Db): AddonsRepo {
 export function channelsRepo(db: Db): ChannelsRepo {
   return {
     async get(tenantId, channel) {
-      const r = await one(scoped(db, tenantId).from("channel_accounts").select("status, public_info").eq("channel", channel).maybeSingle(), "channels.get");
+      const r = await one(scoped(db, tenantId).from("channel_accounts").select("status, public_info, webhook_id").eq("channel", channel).maybeSingle(), "channels.get");
       return mapChannel(channel, r);
     },
     async save(tenantId, channel, v) {
@@ -49,6 +49,12 @@ export function channelsRepo(db: Db): ChannelsRepo {
       if (!ext) return null;
       const rs = await rows(db.from("channel_accounts").select("tenant_id").eq("channel", channel).eq("external_id", ext).eq("status", "connected").limit(1), "channels.findTenantByExternalId");
       return (rs[0]?.tenant_id as string) ?? null;
+    },
+    // CROSS-TENANT by design (Telegram webhook routing): channel_accounts.webhook_id is a unique uuid.
+    async findByWebhookId(channel, webhookId) {
+      if (!isUuid(webhookId)) return null;
+      const r = await one(db.from("channel_accounts").select("tenant_id").eq("channel", channel).eq("webhook_id", webhookId.toLowerCase()).eq("status", "connected").maybeSingle(), "channels.findByWebhookId");
+      return r ? { tenantId: r.tenant_id as string, channel } : null;
     },
   };
 }

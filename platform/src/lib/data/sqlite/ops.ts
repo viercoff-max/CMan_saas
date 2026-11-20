@@ -1,6 +1,6 @@
 // Audit log, AI usage, engine limiter and login/rate-limit counters (SQLite).
 import { newId, nowIso } from "../../ids";
-import { nonNeg, usagePeriod } from "../rules";
+import { nonNeg, tokensRemaining, usagePeriod } from "../rules";
 import type { AuditQuery, AuditRepo, LimiterRepo, RateLimitsRepo, UsageRepo, UsageRow } from "../types";
 import { db, type Row } from "./conn";
 
@@ -49,6 +49,12 @@ export const usage: UsageRepo = {
     return readUsage(tenantId, period);
   },
   async get(tenantId, period = usagePeriod()) { return readUsage(tenantId, period); },
+  async remaining(tenantId, now = new Date()) {
+    const t = db().prepare("SELECT ai_monthly_token_cap FROM tenants WHERE id = ?").get(tenantId) as Row | undefined;
+    if (!t) return 0; // unknown tenant: no budget (fail closed)
+    const u = readUsage(tenantId, usagePeriod(now));
+    return tokensRemaining(t.ai_monthly_token_cap, u.inputTokens, u.outputTokens);
+  },
 };
 
 const count = (sql: string, ...args: (string | number)[]) =>

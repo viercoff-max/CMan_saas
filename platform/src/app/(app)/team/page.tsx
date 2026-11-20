@@ -20,16 +20,15 @@ export default async function TeamPage() {
   let members: TeamRow[] = [];
   let invites: InviteRow[] = [];
   if (supabase) {
-    const [{ createSupabaseServerClient }, { listTeam, listPendingInvites }] = await Promise.all([
+    const [{ createSupabaseServerClient }, { listTeamDirectory, listPendingInvites }] = await Promise.all([
       import("@/lib/auth/supabase-server"), import("@/lib/auth/team"),
     ]);
-    const client = await createSupabaseServerClient();
-    // tenant_members has no name/email (auth.users is not readable with the user session): only "you" is named.
-    members = (await listTeam(client, s.tenantId)).map((m) => ({
+    // Directory (names + emails) server side, after the session proved membership of the active tenant.
+    members = (await listTeamDirectory(s)).map((m) => ({
       userId: m.userId, role: m.role, isYou: m.userId === s.userId,
-      name: m.userId === s.userId ? s.name : null, email: m.userId === s.userId ? s.email : null,
+      name: m.name || (m.userId === s.userId ? s.name : null), email: m.email || (m.userId === s.userId ? s.email : null),
     }));
-    if (canManage) invites = await listPendingInvites(client, s.tenantId);
+    if (canManage) invites = await listPendingInvites(await createSupabaseServerClient(), s.tenantId);
   } else {
     members = (await getData().members.list(s.tenantId)).map((m) => ({ userId: m.userId, role: m.role, isYou: m.userId === s.userId, name: m.name, email: m.email }));
   }

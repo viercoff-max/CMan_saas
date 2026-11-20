@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth";
 import { authBackend } from "@/lib/auth/backend";
+import { AUDIT, auditEvent } from "@/lib/audit-events";
 
 export type TeamActionResult = { ok: true } | { ok: false; error: "invalid" | "failed" | "forbidden" | "unsupported" };
 export type InviteActionResult = { ok: true; link: string } | { ok: false; error: "invalid" | "failed" | "forbidden" | "unsupported" };
@@ -25,7 +26,10 @@ export async function inviteMemberAction(input: unknown): Promise<InviteActionRe
   if (!p.success) return { ok: false, error: "invalid" };
   const [{ createInvitation }, { appBaseUrl }] = await Promise.all([import("@/lib/auth/invitations"), import("@/lib/auth/base-url")]);
   const r = await createInvitation({ userClient: await userClient(), baseUrl: await appBaseUrl() }, { tenantId: s.tenantId, email: p.data.email, role: p.data.role });
-  if (r.ok) revalidatePath("/team");
+  if (r.ok) {
+    await auditEvent(s.tenantId, s.userId, AUDIT.inviteCreated, `role=${p.data.role}`); // never the email or the link
+    revalidatePath("/team");
+  }
   return r;
 }
 
@@ -36,6 +40,7 @@ export async function changeRoleAction(input: unknown): Promise<TeamActionResult
   if (!p.success || p.data.userId === s.userId) return { ok: false, error: "invalid" }; // no self-demotion lockout
   const { changeMemberRole } = await import("@/lib/auth/team");
   const ok = await changeMemberRole(await userClient(), s.tenantId, p.data.userId, p.data.role);
+  if (ok) await auditEvent(s.tenantId, s.userId, AUDIT.roleChanged, `${p.data.userId} role=${p.data.role}`);
   revalidatePath("/team");
   return ok ? { ok: true } : { ok: false, error: "failed" };
 }
@@ -47,6 +52,7 @@ export async function removeMemberAction(input: unknown): Promise<TeamActionResu
   if (!p.success || p.data.userId === s.userId) return { ok: false, error: "invalid" };
   const { removeMember } = await import("@/lib/auth/team");
   const ok = await removeMember(await userClient(), s.tenantId, p.data.userId);
+  if (ok) await auditEvent(s.tenantId, s.userId, AUDIT.memberRemoved, p.data.userId);
   revalidatePath("/team");
   return ok ? { ok: true } : { ok: false, error: "failed" };
 }
@@ -58,6 +64,7 @@ export async function revokeInviteAction(input: unknown): Promise<TeamActionResu
   if (!p.success) return { ok: false, error: "invalid" };
   const { revokeInvite } = await import("@/lib/auth/team");
   const ok = await revokeInvite(await userClient(), s.tenantId, p.data.id);
+  if (ok) await auditEvent(s.tenantId, s.userId, AUDIT.inviteRevoked, p.data.id);
   revalidatePath("/team");
   return ok ? { ok: true } : { ok: false, error: "failed" };
 }

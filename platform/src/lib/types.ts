@@ -62,7 +62,11 @@ export type AddonStatus = "disconnected" | "connected" | "error";
 export interface Addon { key: AddonKey; status: AddonStatus; publicInfo: Record<string, unknown>; connectedAt: string | null }
 
 export type ChannelAccountStatus = "disconnected" | "connected" | "error";
-export interface ChannelAccount { channel: Exclude<Channel, "simulator">; status: ChannelAccountStatus; publicInfo: Record<string, unknown> }
+export interface ChannelAccount {
+  channel: Exclude<Channel, "simulator">; status: ChannelAccountStatus; publicInfo: Record<string, unknown>;
+  /** Public random routing id (uuid) used in webhook URLs (Telegram). null until the channel row exists. Not a secret. */
+  webhookId: string | null;
+}
 
 // ---- Connector interface: add-ons (Shopify now; others later) plug into the engine through this ----
 export interface OrderStatusResult {

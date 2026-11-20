@@ -59,7 +59,7 @@ Add the Supabase implementation of `DataStore` (`src/lib/data/supabase`, `DATA_B
 - `db.ts` exports `DATA_DIR` and `OUTBOX_DIR`; everything that writes customer data to disk must stay under `DATA_DIR`.
 
 ## Data layer (stage 1: 2026-11-19 interface + SQLite; stage 2: 2026-11-20 Supabase backend)
-- `src/lib/data/types.ts`: the `DataStore` contract, split into sub-repos: `tenants`, `members` (read-only), `users` (local
+- `src/lib/data/types.ts`: the `DataStore` contract, split into sub-repos: `tenants`, `platformAdmins`, `members` (read-only), `users` (local
   login until Supabase Auth), `settings`, `brand`, `sections`, `sources`, `chunks`, `conversations`, `messages`, `addons`,
   `channels`, `secrets`, `audit`, `usage` (ai_usage per month), `limiter`, `rateLimits`, `retention`. Every method is async;
   tenant-owned data always takes `tenantId` explicitly. Cross-tenant methods are named and documented as such (webhook
@@ -86,8 +86,49 @@ Add the Supabase implementation of `DataStore` (`src/lib/data/supabase`, `DATA_B
   (`supabase/migrations/20261120100000_server_rpc_counters.sql`, also adds `login_attempts`) and `retention_purge_tenant`,
   `retention_delete_conversations` (`20261120100100_server_rpc_retention.sql`).
   Not offered in Supabase mode (clear `DataBackendUnsupportedError`): local password login (`users.findLoginByEmail`,
-  `create`, `setPasswordHash`: Supabase Auth, stage 3) and creating `kind: "file"` sources (file bytes move to the
-  `tenant-files` Storage bucket in stage 4; TODO in `supabase/knowledge.ts`).
+  `create`, `setPasswordHash`: Supabase Auth, stage 3). File sources work since wave 1 (stage 4): `sources.create({kind:
+  "file", filePath})` stores `storage_path` and refuses (`DataValidationError("filePath")`) any path that does not start
+  with THIS tenant's uuid + "/" (bytes: see "Storage" below).
+  Real migration file names: `20261119235721_server_rpc_counters.sql`, `20261119235722_server_rpc_retention.sql` (applied);
+  `20261120090000_platform_tenant_overview.sql` (wave 1, written, NOT applied yet; test `supabase/tests/platform_tenant_overview.sql`).
+
+### Wave 1 additions (2026-11-19) - the interface wave 2 uses
+All in `src/lib/data/types.ts`, implemented in both backends, covered by `data-store-contract.ts` (incl. cross-tenant
+negatives), the Supabase fake and the tenant-scoping proof.
+- `tenants.get(tenantId): TenantInfo | null` with `TenantInfo = {id, name, slug, plan: "free"|"pro"|"business",
+  status: "active"|"suspended"|"deleted", aiMonthlyTokenCap, createdAt}` (SQLite: additive columns, slug falls back to the id).
+- `tenants.listAll({limit?, offset?, search?, now?}): {items: TenantOverview[], total, period}`. CROSS-TENANT, for the
+  platform-admin screen only: the CALLER must check `platformAdmins.isPlatformAdmin(session.userId)` first.
+  `TenantOverview = TenantInfo + {members, conversationsThisMonth, connectedChannels, aiTokensThisMonth}`; newest first;
+  limit 1..200 (default 50); search = case-insensitive substring of name/slug, LIKE wildcards literal; "this month" =
+  UTC calendar month of `now` (conversations: non-simulator with `last_message_at` in the month; tokens: input+output of
+  ai_usage). Supabase: ONE RPC `platform_tenant_overview` (service_role only); SQLite: one query with subqueries.
+- `platformAdmins.isPlatformAdmin(userId): boolean`. Supabase: `public.platform_admins` (owner inserts rows in SQL).
+  SQLite: env `PLATFORM_ADMIN_EMAILS` (comma-separated, matched against the local user's email). Malformed ids: false.
+- `usage.remaining(tenantId, now?): number` = `aiMonthlyTokenCap - (inputTokens + outputTokens)` of the month, never
+  negative, 0 for an unknown tenant (fail closed). (`usage.record` / `usage.get` unchanged.)
+- `ChannelAccount.webhookId: string | null`: public random uuid of the channel row (Supabase `channel_accounts.webhook_id`;
+  SQLite additive `webhook_id` column, backfilled, unique). Set once, never changed by `channels.save`; null until the row
+  exists. NOT a secret.
+- `channels.findByWebhookId(channel, webhookId): {tenantId, channel} | null`. CROSS-TENANT (Telegram routing:
+  `/api/webhooks/telegram/<webhookId>`). Only `connected` accounts match; malformed / unknown / other channel -> null.
+- Telegram secret: stored ONLY inside the encrypted channel secrets (`secrets.set(t, "channel", "telegram",
+  {botToken, webhookSecret})`); the `tenant_secrets.webhook_secret_hash` column stays unused. Helpers in
+  `src/lib/channels/telegram-secret.ts`: `newTelegramWebhookSecret()`, `telegramSecretMatches(expected, provided)`
+  (constant time, fails closed), `TELEGRAM_SECRET_HEADER`, and `authenticateTelegramWebhook(webhookId, headerValue)`
+  (routing id -> connected tenant -> decrypted secret -> compare; returns `{tenantId}` or null).
+- `AUDIT_GLOBAL_TENANT` (`"system"`): `audit.log("system", ...)` writes a row with no tenant (Supabase: `tenant_id` NULL,
+  service role only; SQLite: tenant_id "system"). Used for failed sign-ins and the Meta deletion callback fallback.
+- Audit events (`src/lib/audit-events.ts`): `AUDIT` action names + `auditEvent()` (never throws) + `auditSignIn()`.
+  Written server side: Supabase sign-in ok (one row per membership tenant) / failure (global), hashed IP only;
+  invitation created (`role=...`, never the email/link), revoked, role changed, member removed (team/actions.ts).
+  Already written elsewhere: tenant created and invitation accepted (by the `create_tenant` / `accept_invitation` RPCs,
+  with actor_user_id), channel connect/disconnect (channels/actions.ts), Shopify connect/disconnect (api/shopify/*).
+  Wave 2 branding must call `auditEvent(tenantId, userId, AUDIT.brandSaved, "<changed field names>")`.
+- Team directory: `listTeamDirectory(session)` in `src/lib/auth/team.ts` = `getData().members.list(session.tenantId)`
+  (service role, real names + emails) after checking the active tenant is one of the session's memberships. Role
+  changes, removals and invitation revokes still go through the user-session client (RLS).
+- `ensureSeed()` is a no-op in Supabase mode (onboarding creates tenants; no local users).
 - Secrets only through `secrets` (`get/set/clear(tenantId, "addon" | "channel", key)`): `addons.get` / `channels.get` never return them.
   Disconnecting an add-on (`addons.save(..., {status:"disconnected"})`) also wipes its secrets; channels need `secrets.clear`.
 - `channels.save` throws `DataConflictError` when another tenant already has that account connected.
@@ -98,3 +139,40 @@ Add the Supabase implementation of `DataStore` (`src/lib/data/supabase`, `DATA_B
   `supabase-contract-live.test.ts` (real project; only with `RUN_LIVE=1`, excluded by `*-live`); `supabase-boundary.test.ts`
   (no "use client" file imports the data layer or the service key); and the type-aware `no-floating-promises` /
   `no-misused-promises` lint rules (a forgotten `await` is a lint error).
+
+## Storage (stage 4, wave 1: 2026-11-19)
+`src/lib/storage/` is the ONLY file access for tenant files and brand assets (server only; a boundary test forbids
+importing it from "use client" files). The backend follows `DATA_BACKEND`:
+- `local` (sqlite, default): `DATA_DIR/uploads/<tenantId>/<key>` (today's layout, so existing files keep working) and
+  `DATA_DIR/brand-assets/<tenantId>/<key>`; every resolved path must stay inside the tenant folder.
+- `supabase`: Storage buckets from the init migration, written with the service-role client of
+  `src/lib/data/supabase/client.ts` (`Db.storage` subset): `tenant-files` (private, 10 MB, pdf/txt/md/csv/html/docx) and
+  `brand-assets` (public, 2 MB, png/jpeg/webp, no SVG). Object path ALWAYS `<tenantId>/<key>`.
+
+Interface (`src/lib/storage/types.ts`), from `getFileStore(bucket = "tenant-files")`:
+```ts
+put(tenantId, key, bytes: Uint8Array, contentType): Promise<string>   // returns "<tenantId>/<key>" to persist
+get(tenantId, key): Promise<Uint8Array | null>                       // null = missing
+remove(tenantId, key): Promise<void>                                 // idempotent
+stat(tenantId, key): Promise<{key, size, updatedAt} | null>
+list(tenantId, prefix): Promise<{key, size, updatedAt}[]>            // direct children, name order, max 1000
+publicUrl(tenantId, key): string                                     // brand-assets only
+```
+Rules: `key` is tenant-relative and SERVER-built (`uploadKey(name)` = `<uuid>-<sanitizeName(name)>`, or fixed names);
+`safeKey` refuses traversal, empty/dot segments, more than 4 segments (`StoragePathError`, no path in the message). The
+store always prepends the validated tenant folder, so a tenant can only address its own objects. A persisted path is
+turned back into a key with `keyFromStored(tenantId, stored)`, which returns null for another tenant's path: use it
+before every read/delete of `sources.filePath` / `brand.logoPath`. Errors are `StorageBackendError` (bucket + op only).
+Who uses it: uploads (`lib/context/upload.ts` `storeUpload`: content type from the extension, never the browser's MIME;
+`discardUpload` if the row insert fails), source indexing (`index-source.ts`), source deletion (`section-index.ts`
+`deleteSourceAndLinks`), the Context page file size (`stat`), and the handoff outbox (`lib/storage/outbox.ts`:
+local = unchanged flat `DATA_DIR/outbox/`; Supabase = `<tenantId>/outbox/<ts>-<conversationId>.txt` in `tenant-files`)
+which `lib/retention` purges (30 days) and deletes per customer.
+Logos (`src/lib/storage/logo.ts`): `uploadLogo(tenantId, bytes, contentType) -> {ok:true, path, url} | {ok:false,
+error:"empty"|"too_big"|"bad_type"}` (png/jpeg/webp only, max 2 MB, magic bytes must match the declared type, SVG always
+rejected, new random key `logo-<uuid>.<ext>` per upload); `logoUrl(tenantId, logoPath)`; `removeLogo(tenantId, logoPath)`.
+Wave 2 flow: `uploadLogo` -> `getData().brand.save(tenantId, {logoPath: r.path})` -> `removeLogo(old)` ->
+`auditEvent(..., AUDIT.brandSaved, "logoPath")`. Local logos are served by `GET /api/brand-assets/<tenantId>/<file>`
+(only `logo-<uuid>.<png|jpg|webp>`, nosniff, immutable cache); in Supabase mode the bucket's public URL is used.
+Tests: `src/lib/storage/__tests__/storage.test.ts` (one FileStore contract for both backends incl. cross-tenant negatives,
+bucket rules on the fake, logos, Supabase-mode outbox and the full upload -> index -> delete flow on the fake project).

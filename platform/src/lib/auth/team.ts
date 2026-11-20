@@ -1,10 +1,29 @@
-// Team management in Supabase mode, always through the USER-session client (RLS: members_update / members_delete /
-// invitations_select / invitations_delete only let owner/admin act, and never on the owner row).
-// Callers (team/actions.ts) also run requireRole("admin") first; RLS is the backstop.
+// Team management in Supabase mode. CHANGES (role updates, removals, invitation revokes) always go through the
+// USER-session client (RLS: members_update / members_delete / invitations_select / invitations_delete only let
+// owner/admin act, and never on the owner row). Callers (team/actions.ts) also run requireRole("admin") first.
+// The member DIRECTORY (names + emails) comes from getData().members.list (service role: auth.users is not readable
+// with the user session), only after the caller's session proved membership of that tenant (listTeamDirectory).
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getData } from "../data";
 import { isRole, type Role } from "./roles";
+import type { Session } from "./session";
 
 export interface TeamMember { userId: string; role: Role; createdAt: string }
+export interface TeamDirectoryEntry { userId: string; role: Role; name: string; email: string }
+
+/**
+ * Names, emails and roles of the ACTIVE tenant's members. `session` comes from getSession()/requireSession(), whose
+ * active tenant was checked against the user's own memberships (RLS) on this request; the check below is a second,
+ * explicit guard so a forged tenant id can never read another tenant's directory. Any member (agents included) may
+ * see the team list; only admins can change it.
+ */
+export async function listTeamDirectory(session: Pick<Session, "tenantId" | "role" | "tenants">): Promise<TeamDirectoryEntry[]> {
+  const isMember = isRole(session.role) && session.tenants.some((t) => t.id === session.tenantId && isRole(t.role));
+  if (!isMember) throw new Error("forbidden");
+  return (await getData().members.list(session.tenantId))
+    .filter((m) => isRole(m.role))
+    .map((m) => ({ userId: m.userId, role: m.role as Role, name: m.name, email: m.email }));
+}
 export interface PendingInvite { id: string; email: string; role: "admin" | "agent"; createdAt: string; expiresAt: string }
 
 export async function listTeam(client: SupabaseClient, tenantId: string): Promise<TeamMember[]> {

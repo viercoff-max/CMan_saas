@@ -25,7 +25,13 @@ defineDataStoreContract({
     const r = fake.tables.tenant_secrets.find((x) => x.tenant_id === tenantId && x.kind === kind && x.key === key);
     return (r?.config_enc as string) ?? null;
   },
-  async addMember(tenantId, email, name) { fake.addMember(tenantId, { email, name }); },
+  async addMember(tenantId, email, name) { return fake.addMember(tenantId, { email, name }); },
+  async makePlatformAdmin(tenantId) {
+    const admin = fake.addMember(tenantId, { email: `pa-${randomUUID()}@example.test`, name: "PA" });
+    const other = fake.addMember(tenantId, { email: `po-${randomUUID()}@example.test`, name: "PO" });
+    fake.tables.platform_admins.push({ user_id: admin, created_at: new Date().toISOString() });
+    return { admin, other };
+  },
 });
 
 // ------------------------------------------------------------------ mappers and error mapping
@@ -97,7 +103,9 @@ describe("supabase backend specifics", () => {
     expect(id).toMatch(/^[0-9a-f-]{36}$/);
     expect(await store.tenants.ensure(slug.toLowerCase(), "otro")).toBe(id);
     expect(await store.tenants.ensure(id, "x")).toBe(id);
-    expect(await store.tenants.get(id)).toEqual({ id, name: "Mi Tienda" });
+    expect(await store.tenants.get(id)).toEqual({
+      id, name: "Mi Tienda", slug: slug.toLowerCase(), plan: "free", status: "active", aiMonthlyTokenCap: 2000000, createdAt: expect.any(String),
+    });
     await expect(store.tenants.ensure("Bad Slug!", "x")).rejects.toBeInstanceOf(DataValidationError);
     await expect(store.tenants.ensure(randomUUID(), "x")).rejects.toBeInstanceOf(DataValidationError);
     expect(await store.tenants.get("chefman")).toBeNull();
@@ -144,10 +152,17 @@ describe("supabase backend specifics", () => {
     expect(await store.chunks.list(t)).toHaveLength(1205);
   });
 
-  it("file sources, local password login: unsupported with a clear error", async () => {
+  it("file sources store the tenant's object path; a path outside the tenant folder is refused", async () => {
+    const t = await T(), other = await T();
+    const src = await store.sources.create(t, { kind: "file", title: "a.pdf", filePath: `${t}/0f-a.pdf` });
+    expect(src).toMatchObject({ kind: "file", filePath: `${t}/0f-a.pdf`, url: null, status: "pending" });
+    expect(fake.tables.sources.find((r) => r.id === src.id)?.storage_path).toBe(`${t}/0f-a.pdf`);
+    for (const bad of [`${other}/a.pdf`, "a.pdf", `${t}/../${other}/a.pdf`, `${t}//a.pdf`, `${t}/`, undefined])
+      await expect(store.sources.create(t, { kind: "file", title: "a.pdf", filePath: bad })).rejects.toBeInstanceOf(DataValidationError);
+  });
+
+  it("local password login: unsupported with a clear error", async () => {
     const t = await T();
-    await expect(store.sources.create(t, { kind: "file", title: "a.pdf", filePath: `${t}/a.pdf` })).rejects.toBeInstanceOf(DataBackendUnsupportedError);
-    await expect(store.sources.create(t, { kind: "file", title: "a.pdf", filePath: "x" })).rejects.toThrow(/Supabase Storage.*\(stage 4\)/);
     await expect(store.users.findLoginByEmail("a@b.test")).rejects.toThrow(/Supabase Auth/);
     await expect(store.users.create({ tenantId: t, email: "a@b.test", name: "A", passwordHash: "x" })).rejects.toBeInstanceOf(DataBackendUnsupportedError);
     await expect(store.users.setPasswordHash(randomUUID(), "x")).rejects.toBeInstanceOf(DataBackendUnsupportedError);
@@ -194,9 +209,13 @@ describe("tenant scoping of every query the Supabase backend issued", () => {
     { name: "retention.metaDeletionReceived", match: (q) => q.table === "audit_log" && q.kind === "select" && q.filters.some((f) => f.col === "action" && f.val === "privacy.meta_deletion_request") && has(q, "detail", "like") },
     { name: "users.count", match: (q) => q.table === "tenant_members" && q.kind === "select" && q.filters.length === 0 && q.columns === "user_id" },
     { name: "users.get", match: (q) => q.table === "tenant_members" && q.kind === "select" && has(q, "user_id") && q.filters.length === 1 },
+    { name: "channels.findByWebhookId", match: (q) => q.table === "channel_accounts" && q.kind === "select" && has(q, "channel") && has(q, "webhook_id") && has(q, "status") && !has(q, "tenant_id") },
+    { name: "audit.log (global row)", match: (q) => q.table === "audit_log" && q.kind === "insert" && !!q.rows?.length && q.rows.every((r) => r.tenant_id === null) },
   ];
   const tenantScoped = (q: Recorded): boolean => {
-    if (q.kind === "rpc") return q.table === "rate_limit_hit" || UUID.test(String(q.args?.p_tenant ?? ""));
+    // Global RPCs: the rate limiter and the platform-admin tenant list (tenants.listAll, CROSS-TENANT by design).
+    if (q.kind === "rpc") return q.table === "rate_limit_hit" || q.table === "platform_tenant_overview" || UUID.test(String(q.args?.p_tenant ?? ""));
+    if (q.table === "platform_admins") return q.kind === "select" && has(q, "user_id"); // global role lookup
     if (!TENANT_TABLES.includes(q.table)) {
       // tenants: by id / slug only, or the retention job's id listing; global counters are not tenant-owned.
       if (q.table === "tenants") return has(q, "id") || has(q, "slug") || (q.kind === "upsert" && !!q.rows?.every((r) => r.slug)) || (q.kind === "select" && q.columns === "id" && q.filters.length === 0);
@@ -213,7 +232,7 @@ describe("tenant scoping of every query the Supabase backend issued", () => {
     // ...and the suite really exercised every tenant-owned table and every cross-tenant path.
     for (const t of TENANT_TABLES) expect(fake.log.some((q) => q.table === t), t).toBe(true);
     for (const c of CROSS_TENANT) expect(fake.log.some(c.match), c.name).toBe(true);
-    for (const fn of ["rate_limit_hit", "usage_add", "conversation_touch", "retention_purge_tenant", "retention_delete_conversations"])
+    for (const fn of ["rate_limit_hit", "usage_add", "conversation_touch", "retention_purge_tenant", "retention_delete_conversations", "platform_tenant_overview"])
       expect(fake.log.some((q) => q.kind === "rpc" && q.table === fn), fn).toBe(true);
   });
 });

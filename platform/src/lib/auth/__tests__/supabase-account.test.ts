@@ -32,7 +32,7 @@ describe("signIn / reset", () => {
       expect(await signIn(c, { email: "a@b.test", password: "x" })).toEqual({ ok: false });
     }
     const ok = auth({ signInWithPassword: async () => ({ data: { user: { id: "u1" } }, error: null }) });
-    expect(await signIn(ok, { email: "a@b.test", password: "x" })).toEqual({ ok: true });
+    expect(await signIn(ok, { email: "a@b.test", password: "x" })).toEqual({ ok: true, userId: "u1" });
   });
   it("password reset always answers ok (and swallows Auth errors)", async () => {
     const fn = vi.fn(async () => { throw new Error("network"); });

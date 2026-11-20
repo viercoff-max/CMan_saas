@@ -1,6 +1,8 @@
 // The Supabase backend holds the SERVICE-ROLE key (bypasses RLS): it must never reach a browser bundle.
 //   * no "use client" file imports src/lib/data/supabase, or the data layer at runtime (type-only imports are fine);
-//   * outside src/lib/data, nobody imports src/lib/data/supabase directly (getData() picks the backend);
+//   * outside src/lib/data, nobody imports src/lib/data/supabase directly (getData() picks the backend), except the
+//     Supabase Storage backend src/lib/storage/supabase.ts (it reuses the same service-role client);
+//   * no "use client" file imports src/lib/storage (server-only FileStore) at runtime;
 //   * no "use client" file mentions the service key.
 import fs from "node:fs";
 import path from "node:path";
@@ -45,9 +47,16 @@ describe("supabase service client boundary", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("only src/lib/data imports src/lib/data/supabase", () => {
-    const offenders = files.filter(({ r }) => !r.startsWith("lib/data/"))
+  it("only src/lib/data (and the Supabase Storage backend) imports src/lib/data/supabase", () => {
+    // Tests may build a Supabase store on the in-memory fake (never bundled).
+    const offenders = files.filter(({ r }) => !r.startsWith("lib/data/") && r !== "lib/storage/supabase.ts" && !isTest(r))
       .flatMap(({ f, r, text }) => runtimeImports(text).filter((s) => pointsTo(s, f, /^lib\/data\/supabase(\/|$)/)).map((s) => `${r}: ${s}`));
+    expect(offenders).toEqual([]);
+  });
+
+  it('no "use client" file imports the FileStore (src/lib/storage) at runtime', () => {
+    const offenders = files.filter(({ text }) => isClient(text))
+      .flatMap(({ f, r, text }) => runtimeImports(text).filter((s) => pointsTo(s, f, /^lib\/storage(\/|$)/)).map((s) => `${r}: ${s}`));
     expect(offenders).toEqual([]);
   });
 

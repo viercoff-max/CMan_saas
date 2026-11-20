@@ -2,8 +2,8 @@
 // The limiter API speaks epoch ms; engine_lookup_failures.at / engine_inbound_log.at / login_attempts.at are
 // timestamptz (converted with msToIso). rate_limits.window_start is a bigint of epoch ms (as in SQLite).
 // Counters that must be atomic use RPCs (usage_add, rate_limit_hit: migration 20261120100000_server_rpc_counters).
-import { nonNeg, usagePeriod } from "../rules";
-import type { AuditQuery, AuditRepo, LimiterRepo, RateLimitsRepo, UsageRepo } from "../types";
+import { nonNeg, tokensRemaining, usagePeriod } from "../rules";
+import { AUDIT_GLOBAL_TENANT, type AuditQuery, type AuditRepo, type LimiterRepo, type RateLimitsRepo, type UsageRepo } from "../types";
 import { scoped, type Db, type Query, type Scoped } from "./client";
 import { allRows, cap, count, isoOr, mapUsage, msToIso, obj, one, rows, run } from "./map";
 
@@ -18,7 +18,10 @@ export function auditRepo(db: Db): AuditRepo {
   return {
     async log(tenantId, actor, action, detail = "") {
       // Lengths capped to the CHECK constraints: an audit row must never make the business action fail.
-      await run(scoped(db, tenantId).from("audit_log").insert({ actor: cap(actor, 80), action: cap(action, 80), detail: cap(detail, 500) }), "audit.log");
+      const row = { actor: cap(actor, 80), action: cap(action, 80), detail: cap(detail, 500) };
+      // GLOBAL row (no tenant: failed sign-in of an unknown email, platform events): tenant_id NULL, service role only.
+      if (tenantId === AUDIT_GLOBAL_TENANT) { await run(db.from("audit_log").insert({ ...row, tenant_id: null }), "audit.log"); return; }
+      await run(scoped(db, tenantId).from("audit_log").insert(row), "audit.log");
     },
     async find(tenantId, q) {
       const rs = await rows(auditFilter(scoped(db, tenantId).from("audit_log").select("detail"), q).order("created_at").limit(1), "audit.find");
@@ -49,6 +52,13 @@ export function usageRepo(db: Db): UsageRepo {
       return mapUsage(s.tenantId, period, r);
     },
     async get(tenantId, period = usagePeriod()) { return readUsage(scoped(db, tenantId), period); },
+    async remaining(tenantId, now = new Date()) {
+      const s = scoped(db, tenantId);
+      const t = await one(db.from("tenants").select("ai_monthly_token_cap").eq("id", s.tenantId).maybeSingle(), "usage.remaining");
+      if (!t) return 0; // unknown tenant: no budget (fail closed)
+      const u = await readUsage(s, usagePeriod(now));
+      return tokensRemaining(t.ai_monthly_token_cap, u.inputTokens, u.outputTokens);
+    },
   };
 }
 

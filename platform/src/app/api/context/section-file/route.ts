@@ -7,7 +7,7 @@ import { getData } from "@/lib/data";
 import { indexSource } from "@/lib/context/index-source";
 import { deleteSourceAndLinks } from "@/lib/context/section-index";
 import { getSectionMeta, isSectionKey, PREVIEW_CHARS } from "@/lib/context/section-repo";
-import { readValidatedUpload, storeUpload } from "@/lib/context/upload";
+import { discardUpload, readValidatedUpload, storeUpload } from "@/lib/context/upload";
 import { checkSameOrigin } from "@/lib/security/origin";
 import { limitOr429 } from "@/lib/security/rate-limit";
 
@@ -26,11 +26,13 @@ export async function POST(req: Request) {
   if (!isSectionKey(key)) return NextResponse.json({ error: "bad_section" }, { status: 400 });
 
   const rel = await storeUpload(session.tenantId, up.original, up.bytes);
-  if (!rel) return NextResponse.json({ error: "bad_type" }, { status: 400 });
+  if (!rel) return NextResponse.json({ error: "upload_failed" }, { status: 500 });
 
   const data = getData();
   const previous = (await getSectionMeta(session.tenantId, key)).fileSourceId;
-  const src = await data.sources.create(session.tenantId, { kind: "file", title: up.original, filePath: rel });
+  let src;
+  try { src = await data.sources.create(session.tenantId, { kind: "file", title: up.original, filePath: rel }); }
+  catch (e) { await discardUpload(session.tenantId, rel); throw e; } // no orphan object without its row
   // Attach first so indexing chunks it as part of the section (never as a general source).
   await data.sections.setFile(session.tenantId, key, src.id);
   await data.sections.setMode(session.tenantId, key, "file");

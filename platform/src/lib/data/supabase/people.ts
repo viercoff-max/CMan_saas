@@ -2,9 +2,10 @@
 // Local password login (users.findLoginByEmail / create / setPasswordHash) is NOT offered here: Supabase Auth owns
 // passwords (stage 3), so those methods fail with a clear DataBackendUnsupportedError instead of half-working.
 import { DataBackendUnsupportedError, DataValidationError } from "../errors";
-import type { Member, MembersRepo, TenantsRepo, UsersRepo } from "../types";
+import { tenantListArgs, usagePeriod } from "../rules";
+import type { Member, MembersRepo, PlatformAdminsRepo, TenantsRepo, UsersRepo } from "../types";
 import { isUuid, scoped, type Db } from "./client";
-import { count, mapRole, one, rows, run, userName } from "./map";
+import { count, mapRole, mapTenant, mapTenantOverview, obj, one, rows, run, TENANT_COLUMNS, userName } from "./map";
 
 const SLUG = /^[a-z0-9][a-z0-9-]{1,62}$/;
 
@@ -12,8 +13,19 @@ export function tenantsRepo(db: Db): TenantsRepo {
   return {
     async get(tenantId) {
       if (!isUuid(tenantId)) return null;
-      const r = await one(db.from("tenants").select("id, name").eq("id", tenantId).maybeSingle(), "tenants.get");
-      return r ? { id: r.id as string, name: String(r.name ?? "") } : null;
+      const r = await one(db.from("tenants").select(TENANT_COLUMNS).eq("id", tenantId).maybeSingle(), "tenants.get");
+      return r ? mapTenant(r) : null;
+    },
+    // CROSS-TENANT by design (platform-admin screen; the caller checked platformAdmins first). One RPC computes the
+    // page and its counts in SQL (migration 20261120090000_platform_tenant_overview.sql, service_role only).
+    async listAll(q = {}) {
+      const { limit, offset, search } = tenantListArgs(q);
+      const period = usagePeriod(q.now ?? new Date());
+      const r = obj((await run(db.rpc("platform_tenant_overview", {
+        p_period: period, p_search: search || null, p_limit: limit, p_offset: offset,
+      }), "tenants.listAll")).data);
+      const items = Array.isArray(r.items) ? (r.items as Record<string, unknown>[]).map(mapTenantOverview) : [];
+      return { items, total: Number(r.total ?? 0), period };
     },
     async ensure(idOrSlug, name) {
       if (isUuid(idOrSlug)) {
@@ -46,6 +58,16 @@ export function membersRepo(db: Db): MembersRepo {
         const u = await authUser(db, m.user_id as string);
         return { userId: m.user_id as string, tenantId: s.tenantId, name: u?.name ?? "", email: u?.email ?? "", role: mapRole(m.role) };
       }));
+    },
+  };
+}
+
+export function platformAdminsRepo(db: Db): PlatformAdminsRepo {
+  return {
+    // CROSS-TENANT (global role): public.platform_admins, read with the service role.
+    async isPlatformAdmin(userId) {
+      if (!isUuid(userId)) return false;
+      return !!(await one(db.from("platform_admins").select("user_id").eq("user_id", userId).maybeSingle(), "platformAdmins.isPlatformAdmin"));
     },
   };
 }

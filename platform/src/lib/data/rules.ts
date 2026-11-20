@@ -26,3 +26,17 @@ export const clampCrossSell = (n: unknown) => Math.min(3, Math.max(0, Math.round
 /** First day of the month of `at` (UTC), as "YYYY-MM-01" (Supabase ai_usage.period is a date). */
 export const usagePeriod = (at: Date = new Date()) => `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}-01`;
 export const nonNeg = (n: unknown) => Math.max(0, Math.floor(Number(n) || 0));
+
+/** cap - used, never negative (usage.remaining in both backends). */
+export const tokensRemaining = (cap: unknown, inputTokens: unknown, outputTokens: unknown): number =>
+  Math.max(0, nonNeg(cap) - nonNeg(inputTokens) - nonNeg(outputTokens));
+
+// ---------- tenants (platform-admin list) ----------
+export const TENANT_DEFAULTS = { plan: "free", status: "active", aiMonthlyTokenCap: 2_000_000 } as const;
+/** tenants.listAll paging: limit 1..200 (default 50), offset >= 0, search trimmed to 100 chars ("" = no filter). */
+export function tenantListArgs(q: { limit?: number; offset?: number; search?: string } = {}): { limit: number; offset: number; search: string } {
+  const limit = Math.min(200, Math.max(1, Math.floor(Number(q.limit ?? 50)) || 50));
+  const offset = Math.max(0, Math.floor(Number(q.offset ?? 0)) || 0);
+  const search = String(q.search ?? "").trim().slice(0, 100);
+  return { limit, offset, search };
+}

@@ -9,7 +9,7 @@
 // Every executed query is recorded in `log` so tests can assert that tenant-owned queries carry a tenant_id filter.
 // The live suite (supabase-contract-live.test.ts) checks the same behaviour against a real project.
 import { randomUUID } from "node:crypto";
-import type { AuthUser, Db, DbError, DbResult, Query, Row, Table } from "../supabase/client";
+import type { AuthUser, Db, DbError, DbResult, Query, Row, StorageBucketApi, StorageError, StorageObject, Table } from "../supabase/client";
 
 type Op = "eq" | "neq" | "in" | "is" | "lt" | "lte" | "gt" | "gte" | "like" | "ilike";
 export interface Filter { op: Op; col: string; val: unknown }
@@ -26,7 +26,7 @@ const UUID_COLS = new Set(["tenant_id", "conversation_id", "source_id", "file_so
 const UUID_ID_TABLES = new Set(["tenants", "sources", "chunks", "conversations", "messages", "audit_log"]);
 
 interface Unique { name: string; cols: string[]; where?: (r: Row) => boolean }
-interface Spec { unique: Unique[]; defaults: () => Row; tenant: boolean; refs?: { cols: [string, string]; table: string; to: [string, string] }[] }
+interface Spec { unique: Unique[]; defaults: () => Row; tenant: boolean; nullableTenant?: boolean; refs?: { cols: [string, string]; table: string; to: [string, string] }[] }
 const pk = (t: string, cols: string[]): Unique => ({ name: `${t}_pkey`, cols });
 const uq = (t: string, cols: string[]): Unique => ({ name: `${t}_${cols.join("_")}_key`, cols });
 let serial = 0;
@@ -35,6 +35,7 @@ const bigId = () => ++serial;
 export const SCHEMA: Record<string, Spec> = {
   tenants: { tenant: false, unique: [pk("tenants", ["id"]), uq("tenants", ["slug"])], defaults: () => ({ id: randomUUID(), plan: "free", status: "active", ai_monthly_token_cap: 2000000, created_at: now() }) },
   tenant_members: { tenant: true, unique: [pk("tenant_members", ["tenant_id", "user_id"])], defaults: () => ({ created_at: now() }) },
+  platform_admins: { tenant: false, unique: [pk("platform_admins", ["user_id"])], defaults: () => ({ created_at: now() }) },
   brand_settings: { tenant: true, unique: [pk("brand_settings", ["tenant_id"])], defaults: () => ({ display_name: "", logo_path: null, primary_color: "#0F766E", accent_color: "#14181F", menu_bg_color: "#F6F7F9", heading_font: "system", updated_at: now() }) },
   agent_settings: { tenant: true, unique: [pk("agent_settings", ["tenant_id"])], defaults: () => ({ agent_name: "Asistente", tone_level: 3, language_default: "es", language_alt: "en", greeting: "", fallback_message: "", handoff_email: "", business_hours: {}, cross_sell_level: 1, bot_enabled: true, tone_saved_at: null, updated_at: now() }) },
   sources: { tenant: true, unique: [pk("sources", ["id"]), uq("sources", ["tenant_id", "id"])], defaults: () => ({ id: randomUUID(), url: null, storage_path: null, status: "pending", error: null, content_text: null, last_synced_at: null, created_at: now() }) },
@@ -69,7 +70,8 @@ export const SCHEMA: Record<string, Spec> = {
     refs: [{ cols: ["tenant_id", "conversation_id"], table: "conversations", to: ["tenant_id", "id"] }],
   },
   ai_usage: { tenant: true, unique: [pk("ai_usage", ["tenant_id", "period"])], defaults: () => ({ requests: 0, input_tokens: 0, output_tokens: 0, updated_at: now() }) },
-  audit_log: { tenant: true, unique: [pk("audit_log", ["id"])], defaults: () => ({ id: randomUUID(), actor_user_id: null, detail: "", created_at: now() }) },
+  // tenant_id is nullable in Postgres (global rows); the fake's tenant FK check skips null tenant ids for this table.
+  audit_log: { tenant: true, nullableTenant: true, unique: [pk("audit_log", ["id"])], defaults: () => ({ id: randomUUID(), actor_user_id: null, detail: "", created_at: now() }) },
   rate_limits: { tenant: false, unique: [pk("rate_limits", ["key"])], defaults: () => ({}) },
   login_attempts: { tenant: false, unique: [pk("login_attempts", ["id"])], defaults: () => ({ id: bigId(), at: now() }) },
   engine_lookup_failures: { tenant: true, unique: [pk("engine_lookup_failures", ["id"])], defaults: () => ({ id: bigId(), at: now() }) },
@@ -130,6 +132,10 @@ export class FakeSupabase implements Db {
     return id;
   }
 
+  /** In-memory Supabase Storage (same bucket rules as the init migration: size limit + allowed MIME types). */
+  readonly storageFake = new FakeStorage();
+  readonly storage = { from: (bucket: string): StorageBucketApi => this.storageFake.bucket(bucket) };
+
   auth = {
     admin: {
       getUserById: async (id: string) => {
@@ -188,7 +194,7 @@ export class FakeSupabase implements Db {
       }
     }
     for (const r of rows) {
-      if (spec.tenant && !this.tables.tenants.some((t) => t.id === r.tenant_id))
+      if (spec.tenant && !(spec.nullableTenant && r.tenant_id == null) && !this.tables.tenants.some((t) => t.id === r.tenant_id))
         throw new Fail(err("23503", `insert or update on table "${table}" violates foreign key constraint "${table}_tenant_id_fkey"`));
       for (const ref of spec.refs ?? []) {
         const [a, b] = ref.cols;
@@ -315,6 +321,29 @@ const held = (c: Row) => {
 const requireTenant = (a: Row) => { if (!a.p_tenant || !UUID.test(String(a.p_tenant))) throw new Fail(err("22004", "tenant_required")); return String(a.p_tenant); };
 
 const RPCS: Record<string, (db: FakeSupabase, a: Row) => unknown> = {
+  // Mirrors 20261120090000_platform_tenant_overview.sql (CROSS-TENANT, service_role only).
+  platform_tenant_overview(db, a) {
+    const period = String(a.p_period ?? "");
+    if (!/^\d{4}-\d{2}-01$/.test(period)) throw new Fail(err("22023", "invalid_period"));
+    const limit = Math.min(200, Math.max(1, Number(a.p_limit ?? 50)));
+    const offset = Math.max(0, Number(a.p_offset ?? 0));
+    const search = String(a.p_search ?? "").trim().slice(0, 100).toLowerCase();
+    const from = `${period}T00:00:00.000Z`;
+    const match = (t: Row) => !search || String(t.name).toLowerCase().includes(search) || String(t.slug).toLowerCase().includes(search);
+    const all = db.tables.tenants.filter(match)
+      .sort((x, y) => cmp(y.created_at, x.created_at) || cmp(x.id, y.id));
+    const items = all.slice(offset, offset + limit).map((t) => {
+      const u = db.tables.ai_usage.find((r) => r.tenant_id === t.id && r.period === period);
+      return {
+        id: t.id, name: t.name, slug: t.slug, plan: t.plan, status: t.status, ai_monthly_token_cap: t.ai_monthly_token_cap, created_at: t.created_at,
+        members: db.tables.tenant_members.filter((m) => m.tenant_id === t.id).length,
+        conversations_this_month: db.tables.conversations.filter((c) => c.tenant_id === t.id && c.channel !== "simulator" && new Date(String(c.last_message_at)).toISOString() >= from).length,
+        connected_channels: db.tables.channel_accounts.filter((c) => c.tenant_id === t.id && c.status === "connected").length,
+        ai_tokens_this_month: u ? Number(u.input_tokens) + Number(u.output_tokens) : 0,
+      };
+    });
+    return { total: all.length, items };
+  },
   rate_limit_hit(db, a) {
     const key = String(a.p_key), limit = Number(a.p_limit), win = Number(a.p_window_ms), t = Number(a.p_now);
     const rows = db.tables.rate_limits;
@@ -377,3 +406,70 @@ const RPCS: Record<string, (db: FakeSupabase, a: Row) => unknown> = {
     return { conversations: c0 - db.tables.conversations.length, messages: m0 - db.tables.messages.length };
   },
 };
+
+// ---------------------------------------------------------------- Storage (mirrors storage.buckets in the init migration)
+export interface StorageCall { bucket: string; op: "upload" | "download" | "remove" | "list" | "publicUrl"; paths: string[] }
+interface StoredObject { bytes: Uint8Array; contentType: string; updatedAt: string; createdAt: string }
+const BUCKETS: Record<string, { public: boolean; limit: number; mimes: string[] }> = {
+  "tenant-files": { public: false, limit: 10485760, mimes: ["application/pdf", "text/plain", "text/markdown", "text/csv", "text/html", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"] },
+  "brand-assets": { public: true, limit: 2097152, mimes: ["image/png", "image/jpeg", "image/webp"] },
+};
+const notFound = (): StorageError => ({ message: "Object not found", statusCode: "404", status: 400 });
+
+export class FakeStorage {
+  readonly objects: Record<string, Map<string, StoredObject>> = Object.fromEntries(Object.keys(BUCKETS).map((b) => [b, new Map()]));
+  readonly calls: StorageCall[] = [];
+  private failures: StorageError[] = [];
+  /** The next storage call fails with `error`. */
+  failNext(error: StorageError) { this.failures.push(error); }
+
+  bucket(name: string): StorageBucketApi {
+    const cfg = BUCKETS[name];
+    if (!cfg) throw new Error(`fake: unknown bucket ${name}`);
+    const store = this.objects[name];
+    const call = (op: StorageCall["op"], paths: string[]) => { this.calls.push({ bucket: name, op, paths }); return this.failures.shift() ?? null; };
+    return {
+      upload: async (path, body, o = {}) => {
+        const forced = call("upload", [path]); if (forced) return { data: null, error: forced };
+        const type = (o.contentType ?? "").split(";")[0].trim();
+        if (body.byteLength > cfg.limit) return { data: null, error: { message: "The object exceeded the maximum allowed size", statusCode: "413", status: 400 } };
+        if (!cfg.mimes.includes(type)) return { data: null, error: { message: `mime type ${type} is not supported`, statusCode: "415", status: 400 } };
+        if (store.has(path) && !o.upsert) return { data: null, error: { message: "The resource already exists", statusCode: "409", status: 400 } };
+        const at = now();
+        store.set(path, { bytes: new Uint8Array(body), contentType: type, updatedAt: at, createdAt: store.get(path)?.createdAt ?? at });
+        return { data: { path }, error: null };
+      },
+      download: async (path) => {
+        const forced = call("download", [path]); if (forced) return { data: null, error: forced };
+        const o = store.get(path);
+        return o ? { data: new Blob([o.bytes.slice()], { type: o.contentType }), error: null } : { data: null, error: notFound() };
+      },
+      remove: async (paths) => {
+        const forced = call("remove", paths); if (forced) return { data: null, error: forced };
+        for (const p of paths) store.delete(p);
+        return { data: [], error: null };
+      },
+      list: async (prefix = "", o = {}) => {
+        const forced = call("list", [prefix]); if (forced) return { data: null, error: forced };
+        const dir = prefix ? `${prefix.replace(/\/+$/, "")}/` : "";
+        const out: StorageObject[] = [];
+        const folders = new Set<string>();
+        for (const [p, obj] of store) {
+          if (!p.startsWith(dir)) continue;
+          const rest = p.slice(dir.length);
+          const slash = rest.indexOf("/");
+          if (slash >= 0) { folders.add(rest.slice(0, slash)); continue; }
+          out.push({ name: rest, id: p, updated_at: obj.updatedAt, created_at: obj.createdAt, metadata: { size: obj.bytes.byteLength, mimetype: obj.contentType } });
+        }
+        for (const f of folders) out.push({ name: f, id: null, metadata: null });
+        let rows = out.filter((x) => !o.search || x.name.startsWith(o.search)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+        rows = rows.slice(o.offset ?? 0, (o.offset ?? 0) + (o.limit ?? 100));
+        return { data: rows, error: null };
+      },
+      getPublicUrl: (path) => {
+        this.calls.push({ bucket: name, op: "publicUrl", paths: [path] });
+        return { data: { publicUrl: `https://fake.supabase.test/storage/v1/object/public/${name}/${path}` } };
+      },
+    };
+  }
+}

@@ -1,18 +1,11 @@
 // Shared upload checks for /api/sources/upload and /api/context/section-file (server only):
 // multipart only, Content-Length required and capped, allowed extension + MIME, magic bytes, safe file name/path.
-import fs from "node:fs/promises";
-import path from "node:path";
-import { randomUUID } from "node:crypto";
-import { UPLOAD_DIR } from "../db";
+// The bytes go to the FileStore (lib/storage): local disk (DATA_DIR/uploads) or the private "tenant-files" bucket.
 import { contentMatchesExt, mimeMatchesExt } from "../security/upload";
+import { getFileStore, keyFromStored, sanitizeName, SOURCE_CONTENT_TYPES, uploadKey } from "../storage";
 import { ALLOWED_EXT, extOf, MAX_UPLOAD_BYTES } from "./extract";
 
-/** Keep letters, digits, dot, dash, underscore; strip any path component. */
-export function sanitizeName(name: string): string {
-  const base = name.split(/[\\/]/).pop() ?? "file";
-  const clean = base.normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^\.+/, "").slice(-80);
-  return clean || "file";
-}
+export { sanitizeName };
 
 const err = (error: string, status: number) => Response.json({ error }, { status });
 
@@ -41,12 +34,24 @@ export async function readValidatedUpload(req: Request): Promise<ValidUpload | R
   return { original, ext, bytes, size: file.size, form };
 }
 
-/** Writes the bytes under UPLOAD_DIR/<tenantId>/ and returns the stored relative path (null if the path escapes). */
+/**
+ * Stores the bytes in the tenant's folder under a server-built key ("<uuid>-<sanitized name>", never the raw name)
+ * with the content type of the extension (the browser's MIME is not trusted), and returns the object path
+ * "<tenantId>/<key>" to save as sources.filePath. Null when storage failed (logged without paths or details).
+ */
 export async function storeUpload(tenantId: string, original: string, bytes: Uint8Array): Promise<string | null> {
-  const rel = path.posix.join(tenantId, `${randomUUID()}-${original}`);
-  const full = path.resolve(UPLOAD_DIR, rel);
-  if (!full.startsWith(path.resolve(UPLOAD_DIR, tenantId) + path.sep)) return null;
-  await fs.mkdir(path.dirname(full), { recursive: true });
-  await fs.writeFile(full, bytes);
-  return rel;
+  const type = SOURCE_CONTENT_TYPES[extOf(original)];
+  if (!type) return null;
+  try {
+    return await getFileStore().put(tenantId, uploadKey(original), bytes, type);
+  } catch (e) {
+    console.error("[upload] storage write failed:", e instanceof Error ? e.name : "error");
+    return null;
+  }
+}
+
+/** Best-effort delete of a stored upload (e.g. the database row could not be created). */
+export async function discardUpload(tenantId: string, stored: string | null): Promise<void> {
+  const key = keyFromStored(tenantId, stored);
+  if (key) await getFileStore().remove(tenantId, key).catch(() => undefined);
 }

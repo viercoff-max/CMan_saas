@@ -2,12 +2,15 @@
 // All SQL lives in the SQLite DataStore (src/lib/data/sqlite/**). App code goes through getData() (src/lib/data),
 // never through getDb(): a test (src/lib/data/__tests__/boundary.test.ts) enforces it.
 import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
 /** Runtime data folder. In production keep it OUT of OneDrive (see docs/RUNBOOK.md), e.g. C:\ProgramData\SocialInbox\data. */
 export const DATA_DIR = process.env.DATA_DIR?.trim() || path.join(process.cwd(), "data");
 export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
+/** Local twin of the public "brand-assets" Storage bucket (logos), served by /api/brand-assets/... */
+export const BRAND_ASSETS_DIR = path.join(DATA_DIR, "brand-assets");
 /** Where handoff notifications should be written (retention purges it). */
 export const OUTBOX_DIR = path.join(DATA_DIR, "outbox");
 
@@ -116,6 +119,8 @@ function addColumnIfMissing(db: DatabaseSync, table: string, column: string, ddl
  * - section_sources: Data sources linked to a context section ("Complementar con fuentes de datos").
  * - engine limiter + login/rate-limit tables (formerly created lazily by their modules).
  * - brand_settings and ai_usage (same shape as the Supabase schema in supabase/migrations).
+ * - tenants.slug / plan / status / ai_monthly_token_cap (wave 1: same defaults as public.tenants).
+ * - channel_accounts.webhook_id: public random routing id (Telegram webhook URL), backfilled, unique.
  */
 export function runMigrations(db: DatabaseSync): void {
   const steps: [string, () => void][] = [
@@ -166,6 +171,17 @@ export function runMigrations(db: DatabaseSync): void {
         PRIMARY KEY (tenant_id, period)
       );
     `)],
+    ["tenants.slug", () => addColumnIfMissing(db, "tenants", "slug", "slug TEXT")],
+    ["tenants.plan", () => addColumnIfMissing(db, "tenants", "plan", "plan TEXT NOT NULL DEFAULT 'free'")],
+    ["tenants.status", () => addColumnIfMissing(db, "tenants", "status", "status TEXT NOT NULL DEFAULT 'active'")],
+    ["tenants.ai_monthly_token_cap", () => addColumnIfMissing(db, "tenants", "ai_monthly_token_cap", "ai_monthly_token_cap INTEGER NOT NULL DEFAULT 2000000")],
+    ["channel_accounts.webhook_id", () => {
+      addColumnIfMissing(db, "channel_accounts", "webhook_id", "webhook_id TEXT");
+      const missing = db.prepare("SELECT tenant_id, channel FROM channel_accounts WHERE webhook_id IS NULL").all() as { tenant_id: string; channel: string }[];
+      const set = db.prepare("UPDATE channel_accounts SET webhook_id = ? WHERE tenant_id = ? AND channel = ? AND webhook_id IS NULL");
+      for (const r of missing) set.run(randomUUID(), r.tenant_id, r.channel);
+      db.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_channel_webhook_id ON channel_accounts(webhook_id) WHERE webhook_id IS NOT NULL");
+    }],
   ];
   for (const [name, run] of steps) {
     try { run(); } catch (e) { console.warn(`[db] migration ${name} failed:`, e instanceof Error ? e.message : "error"); }

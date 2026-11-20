@@ -6,7 +6,9 @@ import type {
   SourceKind, SourceStatus,
 } from "../../types";
 import { DataBackendError, DataConflictError, DataValidationError } from "../errors";
-import type { BrandSettings, CustomerConversation, MemberRole, SectionMode, SectionRow, UsageRow } from "../types";
+import type {
+  BrandSettings, CustomerConversation, MemberRole, SectionMode, SectionRow, TenantInfo, TenantOverview, TenantPlan, TenantStatus, UsageRow,
+} from "../types";
 import type { DbError, DbResult, Query, Row } from "./client";
 
 // ---------------------------------------------------------------- errors
@@ -119,6 +121,25 @@ export function mapBrand(tenantId: string, r: Row): BrandSettings {
   };
 }
 
+// ---------------------------------------------------------------- tenants
+export const TENANT_COLUMNS = "id, name, slug, plan, status, ai_monthly_token_cap, created_at";
+const PLANS: readonly string[] = ["free", "pro", "business"];
+const STATUSES: readonly string[] = ["active", "suspended", "deleted"];
+export function mapTenant(r: Row): TenantInfo {
+  return {
+    id: r.id as string, name: String(r.name ?? ""), slug: String(r.slug ?? ""),
+    plan: (PLANS.includes(String(r.plan)) ? r.plan : "free") as TenantPlan,
+    status: (STATUSES.includes(String(r.status)) ? r.status : "active") as TenantStatus,
+    aiMonthlyTokenCap: Number(r.ai_monthly_token_cap ?? 0), createdAt: isoOr(r.created_at),
+  };
+}
+export function mapTenantOverview(r: Row): TenantOverview {
+  return {
+    ...mapTenant(r), members: Number(r.members ?? 0), conversationsThisMonth: Number(r.conversations_this_month ?? 0),
+    connectedChannels: Number(r.connected_channels ?? 0), aiTokensThisMonth: Number(r.ai_tokens_this_month ?? 0),
+  };
+}
+
 // ---------------------------------------------------------------- people
 export const mapRole = (r: unknown): MemberRole => (r === "owner" || r === "agent" ? r : "admin");
 export const userName = (meta: Record<string, unknown> | null | undefined): string =>
@@ -177,7 +198,10 @@ export function mapAddon(key: Addon["key"], r: Row | null): Addon {
   return { key, status: (r?.status as Addon["status"]) ?? "disconnected", publicInfo: obj(r?.public_info), connectedAt: iso(r?.connected_at) };
 }
 export function mapChannel(channel: ChannelAccount["channel"], r: Row | null): ChannelAccount {
-  return { channel, status: (r?.status as ChannelAccount["status"]) ?? "disconnected", publicInfo: obj(r?.public_info) };
+  return {
+    channel, status: (r?.status as ChannelAccount["status"]) ?? "disconnected", publicInfo: obj(r?.public_info),
+    webhookId: (r?.webhook_id as string) ?? null,
+  };
 }
 /** channel_accounts.external_id (routing + uq_channel_external) comes from publicInfo.externalId. */
 export function externalIdOf(publicInfo: Record<string, unknown> | undefined): string | null {
