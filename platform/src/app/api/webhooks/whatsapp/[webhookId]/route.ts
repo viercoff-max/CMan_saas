@@ -10,6 +10,10 @@ import { resolveOwnAppWebhook, tokenMatches } from "@/lib/channels/whatsapp-own"
 import { handleInbound } from "@/lib/engine";
 import { getData } from "@/lib/data";
 import { sendToCustomer } from "@/lib/channels/send";
+import { hit } from "@/lib/security/rate-limit";
+
+/** Pre-auth throttle per webhook id (DB lookup + decrypt + HMAC are not free). */
+const preAuthOk = async (webhookId: string) => (await hit(`wa-hook:${webhookId}`, 600, 60_000)).ok;
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +28,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ webhookId: stri
   const q = new URL(req.url).searchParams;
   const challenge = q.get("hub.challenge");
   if (q.get("hub.mode") !== "subscribe" || challenge === null || challenge.length > 200) return forbidden();
+  if (!(await preAuthOk(webhookId))) return new Response("rate limited", { status: 429 });
   const route = await resolveOwnAppWebhook(webhookId);
   if (!route || !tokenMatches(route.secrets.verifyToken, q.get("hub.verify_token"))) return forbidden();
   // Show "webhook verificado" in /channels.
@@ -51,6 +56,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ webhookId: str
   if (!WEBHOOK_ID_SHAPE.test(webhookId ?? "")) return forbidden();
   const declared = Number(req.headers.get("content-length") ?? "0");
   if (declared > MAX_BODY_BYTES) return new Response("payload too large", { status: 413 });
+  if (!(await preAuthOk(webhookId))) return new Response("rate limited", { status: 429 });
   const route = await resolveOwnAppWebhook(webhookId);
   if (!route) return forbidden();
 

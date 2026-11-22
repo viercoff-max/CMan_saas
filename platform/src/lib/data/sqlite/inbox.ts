@@ -122,6 +122,11 @@ export const conversations: ConversationsRepo = {
   async assign(tenantId, id, userId) {
     return Number(db().prepare("UPDATE conversations SET assigned_to=? WHERE tenant_id=? AND id=?").run(userId, tenantId, id).changes) === 1;
   },
+  async countLegalHolds(tenantId, excludePrefix) {
+    const r = db().prepare("SELECT COUNT(*) AS n FROM conversations WHERE tenant_id=? AND channel <> 'simulator' AND substr(external_id,1,?) <> ? AND (legal_hold = 1 OR COALESCE(escalation_reason,'') IN ('safety','legal'))")
+      .get(tenantId, excludePrefix.length, excludePrefix) as Row;
+    return Number(r.n ?? 0);
+  },
   async setCustomer(tenantId, id, customerId) {
     const d = db();
     if (customerId && !d.prepare("SELECT 1 AS x FROM customers WHERE tenant_id=? AND id=?").get(tenantId, customerId)) return false;

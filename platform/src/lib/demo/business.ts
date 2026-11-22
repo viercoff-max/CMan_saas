@@ -4,6 +4,7 @@
 // session, so the 5-business limit and reserved names still apply). Marked with an audit row actor "demo",
 // action "demo.business"; deletion requires that mark AND owner role.
 import { getData } from "../data";
+import { AUDIT_GLOBAL_TENANT } from "../data/types";
 import { CONTEXT_SECTION_KEYS } from "../types";
 import { deleteSourceAndLinks, reindexSection, serializeBusinessHours } from "../context";
 import { removeLogo } from "../storage/logo";
@@ -68,14 +69,11 @@ export type DeleteDemoResult = { ok: true } | { ok: false; error: "not_demo" | "
  * tenant. Refused when the tenant is not a demo business, or when a REAL customer conversation (not a "demo-"
  * transcript, not the simulator) is under legal hold: that record must be kept (REVIEW-security-2 H1).
  */
-export async function deleteDemoBusiness(tenantId: string): Promise<DeleteDemoResult> {
+export async function deleteDemoBusiness(tenantId: string, actor?: string): Promise<DeleteDemoResult> {
   if (!(await isDemoBusiness(tenantId))) return { ok: false, error: "not_demo" };
   const data = getData();
-  const real = (await data.conversations.list(tenantId, { limit: 10_000 }))
-    .filter((c) => c.channel !== "simulator" && !c.externalId.startsWith(DEMO_PREFIX));
-  const held = (c: (typeof real)[number]) =>
-    c.legalHold === true || c.state?.legalHold === true || c.escalationReason === "safety" || c.escalationReason === "legal";
-  if (real.some(held)) return { ok: false, error: "legal_hold" };
+  // Uncapped count in the database (not a capped list): any REAL conversation under legal hold blocks the delete.
+  if ((await data.conversations.countLegalHolds(tenantId, DEMO_PREFIX)) > 0) return { ok: false, error: "legal_hold" };
 
   // Best-effort clean-up outside the database: uploaded files, logo, a connected Telegram bot's webhook.
   for (const s of await data.sources.list(tenantId)) {
@@ -87,7 +85,10 @@ export async function deleteDemoBusiness(tenantId: string): Promise<DeleteDemoRe
   if (tg?.botToken) await telegramDeleteWebhook(tg.botToken).catch(() => undefined);
 
   try {
-    return (await data.tenants.remove(tenantId)) ? { ok: true } : { ok: false, error: "failed" };
+    const ok = await data.tenants.remove(tenantId);
+    // The tenant's own audit rows go with it (cascade): keep a platform-level trace (tenant id only, no PII).
+    if (ok) await data.audit.log(AUDIT_GLOBAL_TENANT, actor ?? "system", "demo.business.deleted", tenantId).catch(() => undefined);
+    return ok ? { ok: true } : { ok: false, error: "failed" };
   } catch {
     return { ok: false, error: "failed" };
   }

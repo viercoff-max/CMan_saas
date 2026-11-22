@@ -36,6 +36,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ webhookId: str
   if (!WEBHOOK_ID_SHAPE.test(webhookId ?? "")) return json({ error: "unauthorized" }, 401);
   const declared = Number(req.headers.get("content-length") ?? "0");
   if (declared > MAX_BODY_BYTES) return json({ error: "payload_too_large" }, 413);
+  if (!(await hit(`manychat-pre:${webhookId}`, 600, 60_000)).ok) return json({ error: "rate_limited" }, 429);
   const auth = await authenticateManychat(webhookId, req.headers.get("authorization"));
   if (!auth) return json({ error: "unauthorized" }, 401);
   const { tenantId } = auth;

@@ -80,9 +80,10 @@ export function customersRepo(db: Db): CustomersRepo {
       await run(s.from("customers").delete().eq("id", fromId), "customers.merge");
       return true;
     },
-    async deleteOrphans(tenantId) {
+    async deleteOrphans(tenantId, minAgeMs = 10 * 60_000) {
       const s = scoped(db, tenantId);
-      const all = (await allRows(() => s.from("customers").select("id").order("id"), "customers.deleteOrphans")).map((r) => r.id as string);
+      const cutoff = new Date(Date.now() - minAgeMs).toISOString();
+      const all = (await allRows(() => s.from("customers").select("id").lte("created_at", cutoff).order("id"), "customers.deleteOrphans")).map((r) => r.id as string);
       const used = new Set((await allRows(() => s.from("conversations").select("customer_id").order("id"), "customers.deleteOrphans"))
         .map((r) => r.customer_id as string).filter(Boolean));
       const orphans = all.filter((id) => !used.has(id));
@@ -115,9 +116,9 @@ export function notesRepo(db: Db): NotesRepo {
       }).select("id, conversation_id, author_user_id, body, created_at").maybeSingle(), "notes.add");
       return r ? mapNote(r) : null;
     },
-    async remove(tenantId, noteId, authorUserId) {
-      if (!isUuid(noteId) || !isUuid(authorUserId)) return false;
-      const r = await rows(scoped(db, tenantId).from("conversation_notes").delete().eq("id", noteId).eq("author_user_id", authorUserId).select("id"), "notes.remove");
+    async remove(tenantId, conversationId, noteId, authorUserId) {
+      if (!isUuid(noteId) || !isUuid(authorUserId) || !isUuid(conversationId)) return false;
+      const r = await rows(scoped(db, tenantId).from("conversation_notes").delete().eq("id", noteId).eq("conversation_id", conversationId).eq("author_user_id", authorUserId).select("id"), "notes.remove");
       return r.length === 1;
     },
   };

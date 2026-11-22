@@ -35,7 +35,11 @@ async function ensureCustomer(s: Scoped, r: Row): Promise<Row> {
   const c = await one(s.from("customers").insert({ name: cap(String(r.customer_name ?? ""), 200) }).select("id").maybeSingle(), "conversations.ensureCustomer");
   if (!c) return r;
   await run(s.from("conversations").update({ customer_id: c.id }).eq("id", r.id).is("customer_id", null), "conversations.ensureCustomer");
-  return { ...r, customer_id: c.id };
+  // A concurrent message may have linked another record first: keep the winner, drop ours (no orphan PII).
+  const now = await one(s.from("conversations").select("customer_id").eq("id", r.id).maybeSingle(), "conversations.ensureCustomer");
+  const winner = (now?.customer_id as string) ?? c.id;
+  if (winner !== c.id) await run(s.from("customers").delete().eq("id", c.id), "conversations.ensureCustomer");
+  return { ...r, customer_id: winner };
 }
 
 export function conversationsRepo(db: Db): ConversationsRepo {
@@ -137,6 +141,15 @@ export function conversationsRepo(db: Db): ConversationsRepo {
       if (!isUuid(id) || (userId !== null && !isUuid(userId))) return false;
       const r = await rows(scoped(db, tenantId).from("conversations").update({ assigned_to: userId }).eq("id", id).select("id"), "conversations.assign");
       return r.length === 1;
+    },
+    async countLegalHolds(tenantId, excludePrefix) {
+      const s = scoped(db, tenantId);
+      const held = () => s.from("conversations").select("id", { count: "exact", head: true }).eq("legal_hold", true).neq("channel", "simulator");
+      const [all, excluded] = await Promise.all([
+        count(held(), "conversations.countLegalHolds"),
+        count(held().like("external_id", `${escapeLike(excludePrefix)}%`), "conversations.countLegalHolds"),
+      ]);
+      return Math.max(0, all - excluded);
     },
     async setCustomer(tenantId, id, customerId) {
       if (!isUuid(id) || (customerId !== null && !isUuid(customerId))) return false;

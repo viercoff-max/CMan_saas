@@ -512,7 +512,8 @@ export function defineDataStoreContract(t: ContractTarget): void {
         const c = await data.conversations.getOrCreate(T, "telegram", "77", "Beto");
         const keep = await data.conversations.getOrCreate(T, "telegram", "78", "Caro");
         await data.conversations.delete(T, c.id);
-        expect(await data.customers.deleteOrphans(T)).toBe(1);
+        expect(await data.customers.deleteOrphans(T)).toBe(0); // too recent: may be linked right now
+        expect(await data.customers.deleteOrphans(T, -3_600_000)).toBe(1); // cutoff in the future (the Supabase fake clock runs ahead)
         expect(await data.customers.get(T, c.customerId!)).toBeNull();
         expect(await data.customers.get(T, keep.customerId!)).not.toBeNull();
       });
@@ -524,8 +525,10 @@ export function defineDataStoreContract(t: ContractTarget): void {
         const n1 = await data.notes.add(T, c.id, { authorUserId: u1, body: "Cliente molesto, llamar mañana" });
         await data.notes.add(T, c.id, { authorUserId: u2, body: "Ya le marqué" });
         expect((await data.notes.list(T, c.id)).map((n) => n.body)).toEqual(["Cliente molesto, llamar mañana", "Ya le marqué"]);
-        expect(await data.notes.remove(T, n1!.id, u2)).toBe(false); // not the author
-        expect(await data.notes.remove(T, n1!.id, u1)).toBe(true);
+        expect(await data.notes.remove(T, c.id, n1!.id, u2)).toBe(false); // not the author
+        const other = await data.conversations.getOrCreate(T, "telegram", "90b");
+        expect(await data.notes.remove(T, other.id, n1!.id, u1)).toBe(false); // not through another conversation
+        expect(await data.notes.remove(T, c.id, n1!.id, u1)).toBe(true);
         await data.events.add(T, c.id, { actorUserId: null, kind: "handoff", detail: { reason: "safety" } });
         await data.events.add(T, c.id, { actorUserId: u1, kind: "status", detail: { from: "needs_human", to: "human" } });
         const ev = await data.events.list(T, c.id);
@@ -534,6 +537,20 @@ export function defineDataStoreContract(t: ContractTarget): void {
         await data.conversations.delete(T, c.id);
         expect(await data.notes.list(T, c.id)).toEqual([]);
         expect(await data.events.list(T, c.id)).toEqual([]);
+      });
+
+      it("countLegalHolds: real held conversations only (simulator and demo- transcripts excluded), uncapped", async () => {
+        const T = await newTenant("holds"), U = await newTenant("holds2");
+        const demo = await data.conversations.getOrCreate(T, "telegram", "demo-seguridad");
+        await data.conversations.setStatus(T, demo.id, "needs_human", "safety");
+        const sim = await data.conversations.getOrCreate(T, "simulator", "sim-x");
+        await data.conversations.setStatus(T, sim.id, "needs_human", "legal");
+        expect(await data.conversations.countLegalHolds(T, "demo-")).toBe(0);
+        const real = await data.conversations.getOrCreate(T, "telegram", "777");
+        await data.conversations.setStatus(T, real.id, "needs_human", "safety");
+        await data.conversations.setStatus(T, real.id, "resolved");
+        expect(await data.conversations.countLegalHolds(T, "demo-")).toBe(1);
+        expect(await data.conversations.countLegalHolds(U, "demo-")).toBe(0); // cross-tenant
       });
 
       it("new statuses: pending and waiting_customer are stored, filtered and counted", async () => {

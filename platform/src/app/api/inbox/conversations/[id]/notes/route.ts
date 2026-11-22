@@ -30,7 +30,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     if (!noteId || noteId.length > 64) return json({ error: "invalid_body" }, 400);
     const data = getData();
     if (!(await data.conversations.get(s.tenantId, id))) return json({ error: "not_found" }, 404);
-    const ok = await data.notes.remove(s.tenantId, noteId, s.userId);
+    const ok = await data.notes.remove(s.tenantId, id, noteId, s.userId);
     if (!ok) return json({ error: "not_found" }, 404);
     await data.audit.log(s.tenantId, s.userId, "inbox.note_delete", id);
     return json({ ok: true });

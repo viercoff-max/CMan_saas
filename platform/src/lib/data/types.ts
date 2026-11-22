@@ -218,6 +218,11 @@ export interface ConversationsRepo {
   assign(tenantId: string, id: string, userId: string | null): Promise<boolean>;
   /** Point the conversation at a customer of THIS tenant (null = unlink). False when either is not this tenant's. */
   setCustomer(tenantId: string, id: string, customerId: string | null): Promise<boolean>;
+  /**
+   * Uncapped count of conversations under legal hold that are REAL (not the simulator, external id not starting with
+   * `excludePrefix`, e.g. the demo "demo-" transcripts). Used before deleting a demo business.
+   */
+  countLegalHolds(tenantId: string, excludePrefix: string): Promise<number>;
 }
 
 export interface CustomerListItem extends Customer { conversations: number; channels: Channel[]; lastMessageAt: string | null }
@@ -231,15 +236,18 @@ export interface CustomersRepo {
   update(tenantId: string, id: string, patch: CustomerPatch): Promise<Customer | null>;
   /** Moves every conversation of `fromId` to `intoId` (both this tenant's), merges tags/notes, deletes `fromId`. */
   merge(tenantId: string, fromId: string, intoId: string): Promise<boolean>;
-  /** Customers with no conversation left (after a purge or a customer deletion) are deleted. Returns how many. */
-  deleteOrphans(tenantId: string): Promise<number>;
+  /**
+   * Customers with no conversation left (after a purge or a customer deletion) are deleted. Returns how many.
+   * Only records created more than `minAgeMs` ago (default 10 min), so a record being linked right now is never lost.
+   */
+  deleteOrphans(tenantId: string, minAgeMs?: number): Promise<number>;
 }
 export interface NotesRepo {
   list(tenantId: string, conversationId: string): Promise<ConversationNote[]>;
   /** Null when the conversation is not this tenant's. */
   add(tenantId: string, conversationId: string, n: { authorUserId: string | null; body: string }): Promise<ConversationNote | null>;
-  /** Only the author may delete their note. */
-  remove(tenantId: string, noteId: string, authorUserId: string): Promise<boolean>;
+  /** Only the author may delete their note, and only through the conversation it belongs to. */
+  remove(tenantId: string, conversationId: string, noteId: string, authorUserId: string): Promise<boolean>;
 }
 export interface EventsRepo {
   add(tenantId: string, conversationId: string, e: { actorUserId: string | null; kind: ConversationEventKind; detail?: Record<string, unknown> }): Promise<void>;

@@ -72,10 +72,11 @@ export const customers: CustomersRepo = {
       return true;
     });
   },
-  async deleteOrphans(tenantId) {
+  async deleteOrphans(tenantId, minAgeMs = 10 * 60_000) {
+    const cutoff = new Date(Date.now() - minAgeMs).toISOString();
     return Number(db().prepare(
-      "DELETE FROM customers WHERE tenant_id=? AND NOT EXISTS (SELECT 1 FROM conversations v WHERE v.tenant_id = customers.tenant_id AND v.customer_id = customers.id)",
-    ).run(tenantId).changes);
+      "DELETE FROM customers WHERE tenant_id=? AND julianday(created_at) <= julianday(?) AND NOT EXISTS (SELECT 1 FROM conversations v WHERE v.tenant_id = customers.tenant_id AND v.customer_id = customers.id)",
+    ).run(tenantId, cutoff).changes);
   },
 };
 
@@ -97,9 +98,9 @@ export const notes: NotesRepo = {
       .run(id, tenantId, conversationId, n.authorUserId, n.body.slice(0, 4000), nowIso());
     return mapNote(d.prepare("SELECT * FROM conversation_notes WHERE id=?").get(id) as Row);
   },
-  async remove(tenantId, noteId, authorUserId) {
-    return Number(db().prepare("DELETE FROM conversation_notes WHERE tenant_id=? AND id=? AND author_user_id=?")
-      .run(tenantId, noteId, authorUserId).changes) === 1;
+  async remove(tenantId, conversationId, noteId, authorUserId) {
+    return Number(db().prepare("DELETE FROM conversation_notes WHERE tenant_id=? AND conversation_id=? AND id=? AND author_user_id=?")
+      .run(tenantId, conversationId, noteId, authorUserId).changes) === 1;
   },
 };
 

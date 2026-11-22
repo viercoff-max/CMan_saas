@@ -58,7 +58,7 @@ export async function deleteDemoBusinessAction(_prev: DeleteDemoState, _form: Fo
   if (!s) return { error: "auth" };
   if (s.role !== "owner") return { error: "owner" };
   const tenantId = s.tenantId;
-  const r = await deleteDemoBusiness(tenantId);
+  const r = await deleteDemoBusiness(tenantId, s.userId);
   if (!r.ok) return { error: r.error };
   // Next request picks another business of this user (or onboarding when none is left).
   const other = s.tenants.find((t) => t.id !== tenantId);
