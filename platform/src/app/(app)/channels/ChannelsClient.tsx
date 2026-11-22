@@ -448,7 +448,7 @@ function ManychatCard({ v }: { v: ManychatView }) {
       ) : (
         <p className="mt-4 border-t border-line pt-4 text-sm text-muted">{t("mc.adminOnly")}</p>
       )}
-      <p className="mt-4 rounded-xl border border-dashed border-line p-3 text-sm text-ink">{t("wa.support")} <a className="text-brand underline" href="/billing">{t("wa.support.link")}</a></p>
+      <p className="mt-4 rounded-xl border border-dashed border-line p-3 text-sm text-ink">{t("mc.support")} <a className="text-brand underline" href="/billing">{t("wa.support.link")}</a></p>
       <ConfirmDialog open={!!confirm} title={confirm === "rotate" ? t("mc.rotate") : t("mc.confirmTitle")}
         body={confirm === "rotate" ? t("mc.rotate.body") : t("confirmDisconnect")}
         confirmLabel={confirm === "rotate" ? t("mc.rotate") : t("disconnect")} cancelLabel={t("cancel")}
