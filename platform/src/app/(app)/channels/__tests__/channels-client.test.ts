@@ -5,20 +5,20 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }) }));
 vi.mock("../actions", () => ({
-  connectChannel: vi.fn(), connectTelegram: vi.fn(), disconnectChannel: vi.fn(), disconnectTelegram: vi.fn(), reregisterTelegramWebhook: vi.fn(),
+  connectChannel: vi.fn(), connectManychat: vi.fn(), disconnectManychat: vi.fn(), rotateManychatToken: vi.fn(), connectTelegram: vi.fn(), disconnectChannel: vi.fn(), disconnectTelegram: vi.fn(), reregisterTelegramWebhook: vi.fn(),
 }));
 
 import { LocaleProvider } from "@/lib/i18n-client";
-import { ChannelsClient, type AccountView, type TelegramView, type WhatsAppView } from "../ChannelsClient";
+import { ChannelsClient, type AccountView, type ManychatView, type TelegramView, type WhatsAppView } from "../ChannelsClient";
 import { whatsappPlatformReady } from "@/lib/platform/channels";
 import { channelsDict } from "../dict";
 
 const tgNoBot: TelegramView = { status: "disconnected", username: "", connectedAt: "", webhook: "failed", tokenHint: "", reachable: false, canEdit: true };
 const meta = (status: AccountView["status"] = "disconnected"): AccountView[] =>
   (["whatsapp", "instagram", "messenger"] as const).map((channel) => ({ channel, status, name: status === "connected" ? "Mi página" : "", available: false }));
-const render = (telegram: TelegramView, accounts: AccountView[], locale: "es" | "en" = "es", whatsapp?: WhatsAppView) =>
+const render = (telegram: TelegramView, accounts: AccountView[], locale: "es" | "en" = "es", whatsapp?: WhatsAppView, manychat?: ManychatView) =>
   // children passed as the third argument (react/no-children-prop); the cast only satisfies LocaleProvider's prop type.
-  renderToStaticMarkup(createElement(LocaleProvider, { locale } as { locale: typeof locale; children: ReactNode }, createElement(ChannelsClient, { telegram, accounts, whatsapp })));
+  renderToStaticMarkup(createElement(LocaleProvider, { locale } as { locale: typeof locale; children: ReactNode }, createElement(ChannelsClient, { telegram, accounts, whatsapp, manychat })));
 
 describe("channels page", () => {
   it("tenant with no bot: HTTPS note does not claim a saved bot nor point at a missing button", () => {
@@ -101,5 +101,25 @@ describe("channels page", () => {
     });
     expect(html).not.toContain(channelsDict.es["wa.hook.title"]);
     expect(html).not.toContain(channelsDict.es["f.whatsapp.secret"]);
+  });
+
+  it("Email is shown as coming soon (visual only: no form, no button)", () => {
+    const html = render(tgNoBot, meta());
+    expect(html).toContain(channelsDict.es["c.email"]);
+    expect(html).toContain(channelsDict.es["email.soon"]);
+    expect(html.match(/Conectar y probar/g)).toHaveLength(1);
+  });
+
+  it("ManyChat: admins see the key form; once connected, the endpoint, the Bearer token and the body to paste", () => {
+    const off = render(tgNoBot, meta(), "es", undefined, { status: "disconnected", name: "", canEdit: true, endpointUrl: "", requestToken: "" });
+    expect(off).toContain(channelsDict.es["mc.key"]);
+    expect(off).not.toContain(channelsDict.es["mc.setup.title"]);
+    const on = render(tgNoBot, meta(), "es", undefined, { status: "connected", name: "Mi Tienda MC", canEdit: true, endpointUrl: "https://app.example/api/integrations/manychat/abc", requestToken: "Tok123" });
+    expect(on).toContain("https://app.example/api/integrations/manychat/abc");
+    expect(on).toContain("Bearer Tok123");
+    expect(on).toContain("subscriber_id");
+    const agent = render(tgNoBot, meta(), "es", undefined, { status: "connected", name: "Mi Tienda MC", canEdit: false, endpointUrl: "", requestToken: "" });
+    expect(agent).not.toContain("Bearer");
+    expect(agent).toContain(channelsDict.es["mc.adminOnly"]);
   });
 });

@@ -4,8 +4,9 @@ import { maskTelegramToken, telegramWebhookReachable } from "@/lib/channels/tele
 import type { TelegramChannelSecrets } from "@/lib/channels/telegram-secret";
 import { whatsappWebhookUrl, type WhatsAppChannelSecrets } from "@/lib/channels/whatsapp-own";
 import { PLATFORM_BRAND } from "@/lib/platform/brand";
+import { manychatEndpointUrl, type ManychatSecrets } from "@/lib/channels/manychat";
 import { isChannelAvailable, whatsappPlatformReady } from "@/lib/platform/channels";
-import { ChannelsClient, type AccountView, type TelegramView, type WhatsAppView } from "./ChannelsClient";
+import { ChannelsClient, type AccountView, type ManychatView, type TelegramView, type WhatsAppView } from "./ChannelsClient";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,16 @@ export default async function ChannelsPage() {
     supportEmail: PLATFORM_BRAND.supportEmail ?? PLATFORM_BRAND.privacyContactEmail ?? "",
   };
 
+  // ManyChat: endpoint URL + request token for the business's ManyChat flow (admins only; the API key never leaves).
+  const mc = await data.channels.get(s.tenantId, "manychat");
+  const mcConnected = mc.status === "connected";
+  const mcSecrets = mcConnected && canEdit ? await data.secrets.get<ManychatSecrets>(s.tenantId, "channel", "manychat") : null;
+  const manychat: ManychatView = {
+    status: mc.status, canEdit, name: mcConnected ? String(mc.publicInfo.displayName ?? "") : "",
+    endpointUrl: mcConnected && canEdit ? manychatEndpointUrl(process.env.PUBLIC_URL, mc.webhookId) : "",
+    requestToken: mcSecrets?.requestToken ?? "",
+  };
+
   // The platform's Meta webhook URL and META_VERIFY_TOKEN are platform config: never rendered to tenants (L7).
-  return <ChannelsClient telegram={telegram} accounts={accounts} whatsapp={whatsapp} />;
+  return <ChannelsClient telegram={telegram} accounts={accounts} whatsapp={whatsapp} manychat={manychat} />;
 }

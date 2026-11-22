@@ -4,7 +4,10 @@ import { useRouter } from "next/navigation";
 import { Badge, Button, Card, ConfirmDialog, PageHeader, inputCls } from "@/components/ui";
 import { useT } from "@/lib/i18n-client";
 import { channelsDict } from "./dict";
-import { connectChannel, connectTelegram, disconnectChannel, disconnectTelegram, reregisterTelegramWebhook, type TelegramWebhookState } from "./actions";
+import {
+  connectChannel, connectManychat, connectTelegram, disconnectChannel, disconnectManychat, disconnectTelegram, reregisterTelegramWebhook,
+  rotateManychatToken, type TelegramWebhookState,
+} from "./actions";
 
 type Ch = "whatsapp" | "instagram" | "messenger";
 /** `available` comes from src/lib/platform/channels.ts (single source of truth with the public site and billing). */
@@ -19,6 +22,9 @@ export interface WhatsAppView {
   mode?: "own_app" | "platform" | "none"; webhook?: "ok" | "pending"; webhookUrl?: string; verifyToken?: string; supportEmail?: string;
 }
 
+/** ManyChat: endpoint URL + request token for the business's flow (admins only); the API key never reaches the browser. */
+export interface ManychatView { status: "connected" | "disconnected" | "error"; name: string; canEdit: boolean; endpointUrl: string; requestToken: string }
+
 export interface TelegramView {
   status: "connected" | "disconnected" | "error"; username: string; connectedAt: string;
   webhook: TelegramWebhookState; tokenHint: string; reachable: boolean; canEdit: boolean;
@@ -29,19 +35,23 @@ export interface TelegramView {
  * buttons), the same as on the public site (REVIEW-qa-2 P1-4). The platform's Meta webhook settings (verify token)
  * are platform config and are never shown to tenants (REVIEW-security-2 L7).
  */
-export function ChannelsClient({ telegram, accounts, whatsapp }: { telegram: TelegramView; accounts: AccountView[]; whatsapp?: WhatsAppView }) {
+export function ChannelsClient({ telegram, accounts, whatsapp, manychat }: { telegram: TelegramView; accounts: AccountView[]; whatsapp?: WhatsAppView; manychat?: ManychatView }) {
   const t = useT(channelsDict);
   return (
     <div>
       <PageHeader title={t("title")} subtitle={t("subtitle")} />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <TelegramCard v={telegram} />
+        <div>
+          <TelegramCard v={telegram} />
+          {manychat && <ManychatCard v={manychat} />}
+        </div>
         <section aria-labelledby="more-channels">
           <h2 id="more-channels" className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">{t("more")}</h2>
           <div className="grid gap-4">
             {accounts.map((a) => a.channel === "whatsapp" && whatsapp?.enabled
               ? <WhatsAppCard key={a.channel} v={whatsapp} />
               : <ChannelCard key={a.channel} a={a} />)}
+            <EmailCard />
           </div>
           <p className="mt-4 rounded-xl bg-canvas p-3 text-sm text-muted">{t("tech.test")}</p>
         </section>
@@ -336,6 +346,131 @@ function WhatsAppCard({ v }: { v: WhatsAppView }) {
       </p>
       <ConfirmDialog open={confirm} title={t("wa.confirmTitle")} body={t("confirmDisconnect")} confirmLabel={t("disconnect")} cancelLabel={t("cancel")}
         onConfirm={disconnect} onCancel={() => setConfirm(false)} />
+    </Card>
+  );
+}
+
+/** JSON body the business pastes in its ManyChat External Request (fields picked from ManyChat's field menu). */
+const MANYCHAT_BODY_TEMPLATE = `{
+  "subscriber_id": "{{Contact Id}}",
+  "name": "{{Full Name}}",
+  "text": "{{Last Text Input}}",
+  "channel": "instagram"
+}`;
+
+/**
+ * ManyChat: the business pastes its ManyChat API key; we test it (getInfo) and then show the endpoint URL, the
+ * request token and the body to put in an External Request step of its flow. Inbox replies go out by the ManyChat API.
+ */
+function ManychatCard({ v }: { v: ManychatView }) {
+  const t = useT(channelsDict);
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [apiKey, setApiKey] = useState("");
+  const [msg, setMsg] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+  const [confirm, setConfirm] = useState<"disconnect" | "rotate" | null>(null);
+  const ids = { field: useId(), hint: useId() };
+  const connected = v.status === "connected";
+
+  function save() {
+    setMsg(null);
+    start(async () => {
+      try {
+        const r = await connectManychat({ apiKey });
+        if (r.ok) { setApiKey(""); setMsg({ tone: "ok", text: t("mc.saved", { name: r.name }) }); router.refresh(); }
+        else setMsg({ tone: "bad", text: t(`mc.err.${r.error}`) });
+      } catch { setMsg({ tone: "bad", text: t("mc.err.network") }); }
+    });
+  }
+  function run(kind: "disconnect" | "rotate") {
+    setConfirm(null); setMsg(null);
+    start(async () => {
+      if (kind === "disconnect") await disconnectManychat();
+      else { const r = await rotateManychatToken(); setMsg(r.ok ? { tone: "ok", text: t("mc.rotated") } : { tone: "bad", text: t("mc.err.unknown") }); }
+      router.refresh();
+    });
+  }
+
+  return (
+    <Card className="mt-6 flex flex-col" >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">{t("c.manychat")}</h2>
+          <p className="mt-0.5 text-sm text-muted">{t("d.manychat")}</p>
+        </div>
+        <span className="flex gap-1.5">
+          <Badge tone="info">{t("wa.beta")}</Badge>
+          <Badge tone={connected ? "good" : v.status === "error" ? "bad" : "neutral"}>{t(v.status)}</Badge>
+        </span>
+      </div>
+      {connected && v.name && <p className="mt-4 rounded-xl bg-[var(--ok-bg,#ecfdf3)] p-3 text-sm text-ink">{t("connectedAs", { name: v.name })}</p>}
+
+      {connected && v.canEdit && v.endpointUrl && (
+        <div className="mt-3 space-y-3 rounded-xl border border-line bg-canvas p-3" data-testid="mc-setup">
+          <h3 className="text-sm font-semibold text-ink">{t("mc.setup.title")}</h3>
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-ink">
+            <li>{t("mc.setup.s1")}</li><li>{t("mc.setup.s2")}</li><li>{t("mc.setup.s3")}</li><li>{t("mc.setup.s4")}</li><li>{t("mc.setup.s5")}</li>
+          </ol>
+          <CopyRow label={t("mc.url")} value={v.endpointUrl} />
+          {v.requestToken && <CopyRow label={t("mc.header")} value={`Bearer ${v.requestToken}`} />}
+          <CopyRow label={t("mc.body")} value={MANYCHAT_BODY_TEMPLATE} />
+          <p className="text-xs text-muted">{t("mc.response")}</p>
+        </div>
+      )}
+
+      <p className="mt-3 rounded-xl bg-canvas p-3 text-sm text-muted">{t("mc.window")}</p>
+      <div role="status" aria-live="polite">
+        {msg && <p className={`mt-3 rounded-xl p-3 text-sm ${msg.tone === "ok" ? "bg-[var(--ok-bg,#ecfdf3)] text-[var(--ok,#15803d)]" : "bg-[var(--bad-bg,#fef2f2)] text-danger"}`}>{msg.text}</p>}
+      </div>
+
+      {v.canEdit ? (
+        <form className="mt-4 space-y-3 border-t border-line pt-4" autoComplete="off" onSubmit={(e) => { e.preventDefault(); save(); }}>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{connected ? t("mc.howChange") : t("tg.how")}</h3>
+          <p className="text-sm text-ink">{t("mc.intro")}</p>
+          <Help text={t("mc.help")} />
+          <div>
+            <label htmlFor={ids.field} className="mb-1 block text-sm font-medium text-ink">{t("mc.key")}</label>
+            <input id={ids.field} type="password" autoComplete="new-password" spellCheck={false} placeholder="1234567:abcdef..."
+              aria-describedby={ids.hint} className={`${inputCls} min-h-[44px] font-mono text-base md:text-sm`} value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)} />
+            <span id={ids.hint} className="mt-1 block text-xs text-muted">{`${t("tokenWarn")} ${t("f.secretHint")}`}</span>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {connected ? (
+              <span className="flex flex-wrap gap-2">
+                <Button type="button" variant="ghost" className="min-h-[44px]" onClick={() => setConfirm("rotate")} disabled={pending}>{t("mc.rotate")}</Button>
+                <Button type="button" variant="ghost" className="min-h-[44px]" onClick={() => setConfirm("disconnect")} disabled={pending}>{t("disconnect")}</Button>
+              </span>
+            ) : <span />}
+            <Button type="submit" className="min-h-[44px]" disabled={pending || !apiKey.trim()}>{pending ? t("testing") : t("save")}</Button>
+          </div>
+        </form>
+      ) : (
+        <p className="mt-4 border-t border-line pt-4 text-sm text-muted">{t("mc.adminOnly")}</p>
+      )}
+      <p className="mt-4 rounded-xl border border-dashed border-line p-3 text-sm text-ink">{t("wa.support")} <a className="text-brand underline" href="/billing">{t("wa.support.link")}</a></p>
+      <ConfirmDialog open={!!confirm} title={confirm === "rotate" ? t("mc.rotate") : t("mc.confirmTitle")}
+        body={confirm === "rotate" ? t("mc.rotate.body") : t("confirmDisconnect")}
+        confirmLabel={confirm === "rotate" ? t("mc.rotate") : t("disconnect")} cancelLabel={t("cancel")}
+        onConfirm={() => confirm && run(confirm)} onCancel={() => setConfirm(null)} />
+    </Card>
+  );
+}
+
+/** Email: visual placeholder only (not functional yet). */
+function EmailCard() {
+  const t = useT(channelsDict);
+  return (
+    <Card className="flex flex-col opacity-90">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="text-lg font-semibold">{t("c.email")}</h3>
+        <Badge>{t("soon")}</Badge>
+      </div>
+      <p className="mt-1 text-sm text-muted">{t("d.email")}</p>
+      <ul className="mt-3 space-y-1 text-sm text-ink">
+        <li>✓ {t("email.f1")}</li><li>✓ {t("email.f2")}</li><li>✓ {t("email.f3")}</li>
+      </ul>
+      <p className="mt-3 text-sm text-ink">{t("email.soon")}</p>
     </Card>
   );
 }

@@ -64,3 +64,22 @@ deja de ser obligatoria para los negocios. Para vender así a terceros Meta exig
 - Cobros (Stripe/CFDI) y límites por plan.
 - Prueba en vivo del contrato de datos: `RUN_LIVE=1` contra un proyecto de prueba.
 - Detalles menores en `docs/REQUESTS.md`, `docs/REVIEW-qa-2.md` y `docs/REVIEW-security-2.md`.
+
+## Fase 3 publicada el 2026-11-22: ManyChat + Email (visual)
+**ManyChat** (Canales → ManyChat, beta). ManyChat sigue con los flujos del negocio; Conversa responde las dudas.
+1. El negocio pega su **clave de API de ManyChat** (ManyChat → Settings → API; requiere plan de pago). Probamos la clave
+   con `GET /fb/page/getInfo` y la guardamos cifrada.
+2. La tarjeta muestra la **dirección** `https://conversa-mvp.vercel.app/api/integrations/manychat/<id>`, el header
+   **`Authorization: Bearer <token>`** (generado por nosotros; se puede rotar) y el **Body** a pegar en una acción
+   «External Request» del flujo: `subscriber_id` (Contact Id), `name` (Full Name), `text` (Last Text Input) y `channel`
+   (instagram / messenger / whatsapp / telegram).
+3. Conversa contesta en la misma llamada: `reply`, `needs_human`, `reason`, `status` y un bloque «Dynamic Block v2».
+   En ManyChat se mapea `$.reply` a un campo y se envía; `$.needs_human` sirve para pasar el caso al equipo.
+4. Las conversaciones quedan en Mensajes (canal ManyChat) con su ficha de cliente. Una respuesta del equipo sale por
+   `POST /fb/sending/sendContent`. Fuera de 24 h ManyChat la rechaza (código 3011) y la bandeja lo avisa.
+Verificado con la especificación oficial de la API de ManyChat (api.manychat.com/swagger, Page API) y las pruebas
+automáticas (endpoint con token, aislamiento entre negocios, escalamiento, envío desde la bandeja, error 3011).
+**No verificado**: una cuenta real de ManyChat (no la probamos; la cuenta revisada es plan gratis, sin API) ni el
+tiempo máximo de espera del External Request.
+
+**Email**: tarjeta visual «Próximamente» en Canales (sin funcionalidad todavía).

@@ -7,7 +7,7 @@ import { isDemoConversation, isUrgent } from "@/app/(app)/inbox/kinds";
 import { teamDirectory } from "@/lib/inbox/team";
 
 const Query = z.object({
-  channel: z.enum(["telegram", "whatsapp", "instagram", "messenger", "simulator"]).optional(),
+  channel: z.enum(["telegram", "whatsapp", "instagram", "messenger", "manychat", "simulator"]).optional(),
   status: z.enum(["bot", "needs_human", "human", "pending", "waiting_customer", "resolved"]).optional(),
   assigned: z.enum(["mine", "none"]).optional(),
   q: z.string().max(100).optional(),

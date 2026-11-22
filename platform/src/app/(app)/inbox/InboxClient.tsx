@@ -19,7 +19,7 @@ type Thread = {
 };
 const POLL_MS = 4000;
 // Live channels (src/lib/platform/channels.ts) + the simulator.
-const PLATFORMS: Channel[] = ["telegram", "whatsapp", "simulator"];
+const PLATFORMS: Channel[] = ["telegram", "whatsapp", "manychat", "simulator"];
 const STATUS_TABS: ConversationStatus[] = ["needs_human", "human", "pending", "waiting_customer", "bot", "resolved"];
 type Assigned = "" | "mine" | "none";
 const ON_BRAND = "text-[var(--on-brand,#fff)]";

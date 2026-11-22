@@ -11,6 +11,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Skip static assets and the Meta webhooks (signed by Meta, no user session).
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/webhooks|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
+  // Skip static assets, the channel webhooks and the ManyChat integration (machine calls, no user session).
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/webhooks|api/integrations|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };

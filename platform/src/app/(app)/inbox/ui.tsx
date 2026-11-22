@@ -8,6 +8,7 @@ const PLATFORM: Record<Channel, { label: string; cls: string }> = {
   whatsapp: { label: "WA", cls: "bg-green-700 text-white" },
   instagram: { label: "IG", cls: "bg-pink-700 text-white" },
   messenger: { label: "MS", cls: "bg-blue-700 text-white" },
+  manychat: { label: "MC", cls: "bg-violet-700 text-white" },
   simulator: { label: "SIM", cls: "bg-slate-600 text-white" },
 };
 export function PlatformIcon({ channel, name }: { channel: Channel; name?: string }) {

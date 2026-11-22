@@ -12,6 +12,7 @@ import type { Conversation } from "../types";
 import { getData } from "../data";
 import { FB_GRAPH, IG_GRAPH, isInstagramLoginToken } from "./graph";
 import { TELEGRAM_TEXT_LIMIT, telegramCall, type TelegramFailure } from "./telegram";
+import { isManychatSubChannel, MANYCHAT_TEXT_LIMIT, manychatSendText, type ManychatSecrets } from "./manychat";
 
 const TIMEOUT_MS = 10_000;
 const HOUR = 60 * 60 * 1000;
@@ -149,10 +150,27 @@ async function sendTelegram(tenantId: string, conv: Conversation, text: string):
   return { ok: true };
 }
 
+/**
+ * ManyChat contact (Instagram / Messenger / WhatsApp / Telegram inside ManyChat): POST /fb/sending/sendContent with the
+ * business's ManyChat API key. ManyChat itself enforces the 24 h rule (error 3011), reported as outside_24h_window.
+ */
+async function sendManychat(tenantId: string, conv: Conversation, text: string): Promise<{ ok: boolean; error?: string }> {
+  const parts = splitMessage(text, MANYCHAT_TEXT_LIMIT, "chars");
+  if (parts.length === 0) return { ok: false, error: "empty_message" };
+  const data = getData();
+  const account = await data.channels.get(tenantId, "manychat");
+  if (account.status !== "connected") return { ok: false, error: "channel_not_connected" };
+  const apiKey = (await data.secrets.get<ManychatSecrets>(tenantId, "channel", "manychat"))?.apiKey;
+  if (!apiKey) return { ok: false, error: "missing_token" };
+  const sub = isManychatSubChannel(conv.state?.manychatChannel) ? conv.state.manychatChannel : null;
+  return manychatSendText(apiKey, conv.externalId, parts, sub);
+}
+
 export async function sendToCustomer(tenantId: string, conv: Conversation, text: string): Promise<{ ok: boolean; error?: string }> {
   try {
     if (conv.channel === "simulator") return { ok: true };
     if (conv.channel === "telegram") return await sendTelegram(tenantId, conv, text);
+    if (conv.channel === "manychat") return await sendManychat(tenantId, conv, text);
     const ch = conv.channel as MetaCh;
     const limit = TEXT_LIMITS[ch];
     if (!limit) return { ok: false, error: "unknown_channel" };

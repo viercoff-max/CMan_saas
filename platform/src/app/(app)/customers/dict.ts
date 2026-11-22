@@ -20,7 +20,7 @@ export const customersDict: Dict = {
     "merge": "Unir con otro cliente", "merge.hint": "Si esta persona también te escribe por otro canal, une las dos fichas: sus conversaciones quedan juntas aquí.",
     "merge.pick": "Elige la otra ficha", "merge.btn": "Unir aquí", "merge.done": "Fichas unidas.", "merge.failed": "No se pudieron unir las fichas.",
     "merge.adminOnly": "Solo una persona administradora puede unir fichas.",
-    "p.telegram": "Telegram", "p.whatsapp": "WhatsApp", "p.instagram": "Instagram", "p.messenger": "Messenger", "p.simulator": "Simulador",
+    "p.telegram": "Telegram", "p.whatsapp": "WhatsApp", "p.instagram": "Instagram", "p.messenger": "Messenger", "p.manychat": "ManyChat", "p.simulator": "Simulador",
     "b.bot": "Asistente", "b.needs_human": "Necesita a una persona", "b.human": "Con una persona", "b.pending": "Pendiente", "b.waiting_customer": "Esperando al cliente", "b.resolved": "Resuelta",
   },
   en: {
@@ -42,7 +42,7 @@ export const customersDict: Dict = {
     "merge": "Merge with another customer", "merge.hint": "If this person also writes on another channel, merge both records: their conversations stay together here.",
     "merge.pick": "Pick the other record", "merge.btn": "Merge here", "merge.done": "Records merged.", "merge.failed": "Could not merge the records.",
     "merge.adminOnly": "Only an admin can merge records.",
-    "p.telegram": "Telegram", "p.whatsapp": "WhatsApp", "p.instagram": "Instagram", "p.messenger": "Messenger", "p.simulator": "Simulator",
+    "p.telegram": "Telegram", "p.whatsapp": "WhatsApp", "p.instagram": "Instagram", "p.messenger": "Messenger", "p.manychat": "ManyChat", "p.simulator": "Simulator",
     "b.bot": "Assistant", "b.needs_human": "Needs a person", "b.human": "With a person", "b.pending": "Pending", "b.waiting_customer": "Waiting for customer", "b.resolved": "Resolved",
   },
 };

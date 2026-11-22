@@ -11,6 +11,7 @@ import {
 import { newTelegramWebhookSecret, type TelegramChannelSecrets } from "@/lib/channels/telegram-secret";
 import { APP_SECRET_SHAPE, newWhatsAppVerifyToken, type WhatsAppChannelSecrets } from "@/lib/channels/whatsapp-own";
 import { whatsappPlatformReady } from "@/lib/platform/channels";
+import { isManychatApiKey, manychatGetInfo, newManychatRequestToken, type ManychatSecrets } from "@/lib/channels/manychat";
 
 const id = z.string().trim().min(3).max(64).regex(/^[A-Za-z0-9_.-]+$/);
 const token = z.string().trim().min(10).max(1024);
@@ -202,6 +203,75 @@ export async function disconnectTelegram(): Promise<{ ok: boolean }> {
   await data.secrets.clear(s.tenantId, "channel", "telegram");
   await data.channels.save(s.tenantId, "telegram", { status: "disconnected", publicInfo: {} });
   await data.audit.log(s.tenantId, s.userId, "channel.disconnect", "telegram");
+  revalidatePath("/channels");
+  return { ok: true };
+}
+
+// ---------------- ManyChat ----------------
+// Connect order: getInfo (key works) -> channels.save(connected) [conflict = another brand uses this ManyChat account]
+// -> secrets.set({ apiKey, requestToken }). The request token is generated once and kept on reconnect (it is pasted
+// in the business's ManyChat flow). Neither the key nor the token is logged or put in audit details.
+export type ManychatConnectResult =
+  | { ok: true; name: string }
+  | { ok: false; error: "invalid" | "auth" | "token" | "plan" | "network" | "rate" | "in_use" | "unknown" };
+
+const ManychatInput = z.object({ apiKey: z.string().trim().max(300) });
+
+export async function connectManychat(input: unknown): Promise<ManychatConnectResult> {
+  const s = await getSession();
+  if (!s) return { ok: false, error: "auth" };
+  assertRole(s, "admin");
+  const p = ManychatInput.safeParse(input);
+  if (!p.success || !isManychatApiKey(p.data.apiKey)) return { ok: false, error: "invalid" };
+  const apiKey = p.data.apiKey.trim();
+  const data = getData();
+  const info = await manychatGetInfo(apiKey);
+  if (!info.ok) {
+    await data.audit.log(s.tenantId, s.userId, "channel.connect_failed", `manychat:${info.error}`);
+    const e = info.error;
+    return { ok: false, error: e === "token" || e === "plan" || e === "network" || e === "rate" ? e : "unknown" };
+  }
+  const previous = await data.secrets.get<ManychatSecrets>(s.tenantId, "channel", "manychat");
+  try {
+    await data.channels.save(s.tenantId, "manychat", {
+      status: "connected",
+      publicInfo: { externalId: info.id ? `mc-${info.id}` : undefined, displayName: info.name, pro: info.pro, connectedAt: new Date().toISOString() },
+    });
+  } catch (e) {
+    if (e instanceof DataConflictError) {
+      await data.audit.log(s.tenantId, s.userId, "channel.connect_failed", "manychat:in_use");
+      return { ok: false, error: "in_use" };
+    }
+    throw e;
+  }
+  await data.secrets.set(s.tenantId, "channel", "manychat", { apiKey, requestToken: previous?.requestToken || newManychatRequestToken() });
+  await data.audit.log(s.tenantId, s.userId, "channel.connect", "manychat");
+  revalidatePath("/channels");
+  return { ok: true, name: info.name };
+}
+
+/** New request token (the old one stops working at once); the business pastes the new one in its ManyChat flow. */
+export async function rotateManychatToken(): Promise<{ ok: boolean }> {
+  const s = await getSession();
+  if (!s) return { ok: false };
+  assertRole(s, "admin");
+  const data = getData();
+  const sec = await data.secrets.get<ManychatSecrets>(s.tenantId, "channel", "manychat");
+  if (!sec?.apiKey) return { ok: false };
+  await data.secrets.set(s.tenantId, "channel", "manychat", { apiKey: sec.apiKey, requestToken: newManychatRequestToken() });
+  await data.audit.log(s.tenantId, s.userId, "channel.token_rotated", "manychat");
+  revalidatePath("/channels");
+  return { ok: true };
+}
+
+export async function disconnectManychat(): Promise<{ ok: boolean }> {
+  const s = await getSession();
+  if (!s) return { ok: false };
+  assertRole(s, "admin");
+  const data = getData();
+  await data.secrets.clear(s.tenantId, "channel", "manychat");
+  await data.channels.save(s.tenantId, "manychat", { status: "disconnected", publicInfo: {} });
+  await data.audit.log(s.tenantId, s.userId, "channel.disconnect", "manychat");
   revalidatePath("/channels");
   return { ok: true };
 }

@@ -1,7 +1,7 @@
 // Shared domain types. This file is the CONTRACT between modules; change with care.
 
-export type Channel = "telegram" | "whatsapp" | "instagram" | "messenger" | "simulator";
-export const CHANNELS: Channel[] = ["telegram", "whatsapp", "instagram", "messenger", "simulator"];
+export type Channel = "telegram" | "whatsapp" | "instagram" | "messenger" | "manychat" | "simulator";
+export const CHANNELS: Channel[] = ["telegram", "whatsapp", "instagram", "messenger", "manychat", "simulator"];
 
 /**
  * "pending" (the team follows up later) and "waiting_customer" (the team asked the customer something) are
