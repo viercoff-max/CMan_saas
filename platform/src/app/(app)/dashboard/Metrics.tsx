@@ -19,10 +19,10 @@ function Hero({ title, value, hint, tone }: { title: string; value: string; hint
 }
 
 /** Vertical single-series bars with a hover/focus value and a data table. */
-function Bars({ title, hint, rows, label, t }: { title: string; hint?: string; rows: { k: string; n: number }[]; label: (k: string) => string; t: T }) {
+function Bars({ title, hint, rows, label, tick = label, t }: { title: string; hint?: string; rows: { k: string; n: number }[]; label: (k: string) => string; tick?: (k: string) => string; t: T }) {
   const max = Math.max(1, ...rows.map((r) => r.n));
   const total = rows.reduce((a, r) => a + r.n, 0);
-  const step = rows.length > 16 ? Math.ceil(rows.length / 8) : rows.length > 10 ? 2 : 1;
+  const step = rows.length > 16 ? Math.ceil(rows.length / 6) : rows.length > 10 ? 3 : 1;
   return (
     <Card className="p-4 sm:col-span-2">
       <div className="text-xs font-semibold uppercase tracking-wide text-muted">{title}</div>
@@ -38,7 +38,7 @@ function Bars({ title, hint, rows, label, t }: { title: string; hint?: string; r
             ))}
           </div>
           <div className="mt-1 flex gap-[2px] text-[10px] text-muted" aria-hidden>
-            {rows.map((r, i) => <span key={r.k} className="flex-1 truncate text-center">{i % step === 0 ? label(r.k) : ""}</span>)}
+            {rows.map((r, i) => <span key={r.k} className="flex-1 overflow-visible whitespace-nowrap text-center">{i % step === 0 ? tick(r.k) : ""}</span>)}
           </div>
           <details className="mt-2 text-sm">
             <summary className="inline-flex min-h-11 cursor-pointer items-center text-brand underline decoration-dotted">{t("m.data")}</summary>
@@ -90,7 +90,7 @@ export function MetricCards({ cards, m, ai, t, locale, timeZone }: { cards: Metr
       case "customers": return <Hero key={k} title={t("m.c.customers")} value={num(m.customers.new + m.customers.returning)} hint={`${num(m.customers.new)} ${t("m.c.customers.new")} · ${num(m.customers.returning)} ${t("m.c.customers.returning")}`} />;
       case "orders": return <Hero key={k} title={t("m.c.orders")} value={num(m.orders.found + m.orders.notFound)} hint={`${num(m.orders.found)} ${t("m.c.orders.found")} · ${num(m.orders.notFound)} ${t("m.c.orders.notFound")} · ${num(m.orders.other)} ${t("m.c.orders.other")}`} />;
       case "ai": return ai ? <Hero key={k} title={t("m.c.ai")} value={ai.noCap ? "—" : `${ai.percent}%`} hint={t("m.c.ai.hint", { used: num(ai.used), cap: num(ai.cap), cost: ai.costUsd.toFixed(4), per: ai.perConversationUsd == null ? "—" : `$${ai.perConversationUsd.toFixed(4)}` })} /> : null;
-      case "per_day": return <Bars key={k} title={t("m.c.per_day")} rows={m.perDay.map((r) => ({ k: r.day, n: r.n }))} label={dayLabel} t={t} />;
+      case "per_day": return <Bars key={k} title={t("m.c.per_day")} rows={m.perDay.map((r) => ({ k: r.day, n: r.n }))} label={dayLabel} tick={(d) => String(Number(d.split("-")[2]))} t={t} />;
       case "peak_hours": return <Bars key={k} title={t("m.c.peak_hours")} hint={t("m.c.peak_hours.hint", { tz: timeZone })} rows={m.peakHours.map((r) => ({ k: String(r.hour), n: r.n }))} label={(h) => `${h}h`} t={t} />;
       case "channels": return <Ranked key={k} title={t("m.c.channels")} rows={m.channels.map((r) => ({ label: t(`p.${r.channel}`) === `p.${r.channel}` ? r.channel : t(`p.${r.channel}`), n: r.n }))} t={t} />;
       case "handoff_reasons": return <Ranked key={k} title={t("m.c.handoff_reasons")} rows={m.handoffReasons.map((r) => ({ label: pick(r.reason, "r"), n: r.n }))} t={t} />;
