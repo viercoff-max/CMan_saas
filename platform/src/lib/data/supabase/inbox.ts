@@ -218,6 +218,12 @@ export function messagesRepo(db: Db): MessagesRepo {
         .eq("provider_message_id", providerMessageId).limit(1), "messages.hasProviderMessage");
       return rs.length > 0;
     },
+    async listSince(tenantId, sinceIso, limit = 20000) {
+      const s = scoped(db, tenantId);
+      const cap = Math.max(1, Math.min(limit, 50000));
+      return (await allRows(() => s.from("messages").select(MSG_COLS).gte("created_at", sinceIso).order("created_at").order("id"), "messages.listSince"))
+        .slice(0, cap).map(mapMessage);
+    },
     async setCreatedAt(tenantId, messageId, at) {
       if (!isUuid(messageId)) return;
       await run(scoped(db, tenantId).from("messages").update({ created_at: at }).eq("id", messageId), "messages.setCreatedAt");

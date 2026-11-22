@@ -3,7 +3,7 @@
 // 20261122120000_team_inbox.sql (browser roles can only SELECT them; writes happen here, server side).
 import type { Channel, ConversationEvent, ConversationEventKind, ConversationNote, Customer } from "../../types";
 import { normalizeCustomerPatch } from "../rules";
-import type { CustomerListItem, CustomersRepo, EventsRepo, NotesRepo } from "../types";
+import type { CustomerListItem, CustomersRepo, DashboardPrefsRepo, EventsRepo, NotesRepo } from "../types";
 import { isUuid, scoped, type Db, type Row } from "./client";
 import { allRows, cap, escapeLike, isoOr, obj, one, rows, run } from "./map";
 
@@ -137,10 +137,30 @@ export function eventsRepo(db: Db): EventsRepo {
     async list(tenantId, conversationId) {
       if (!isUuid(conversationId)) return [];
       return (await rows(scoped(db, tenantId).from("conversation_events").select("id, conversation_id, actor_user_id, kind, detail, created_at")
-        .eq("conversation_id", conversationId).order("created_at").order("id"), "events.list")).map((r): ConversationEvent => ({
-        id: r.id as string, conversationId: r.conversation_id as string, actorUserId: (r.actor_user_id as string) ?? null,
-        kind: r.kind as ConversationEventKind, detail: obj(r.detail), createdAt: isoOr(r.created_at),
-      }));
+        .eq("conversation_id", conversationId).order("created_at").order("id"), "events.list")).map(mapEvent);
+    },
+    async listSince(tenantId, sinceIso, limit = 20000) {
+      const s = scoped(db, tenantId);
+      return (await allRows(() => s.from("conversation_events").select("id, conversation_id, actor_user_id, kind, detail, created_at")
+        .gte("created_at", sinceIso).order("created_at").order("id"), "events.listSince")).slice(0, Math.max(1, Math.min(limit, 50000))).map(mapEvent);
+    },
+  };
+}
+const mapEvent = (r: Row): ConversationEvent => ({
+  id: r.id as string, conversationId: r.conversation_id as string, actorUserId: (r.actor_user_id as string) ?? null,
+  kind: r.kind as ConversationEventKind, detail: obj(r.detail), createdAt: isoOr(r.created_at),
+});
+
+export function dashboardPrefsRepo(db: Db): DashboardPrefsRepo {
+  return {
+    async get(tenantId, userId) {
+      if (!isUuid(userId)) return null;
+      const r = await one(scoped(db, tenantId).from("dashboard_prefs").select("cards").eq("user_id", userId).maybeSingle(), "dashboardPrefs.get");
+      return r && Array.isArray(r.cards) ? (r.cards as unknown[]).map(String) : null;
+    },
+    async save(tenantId, userId, cards) {
+      if (!isUuid(userId)) return;
+      await run(scoped(db, tenantId).from("dashboard_prefs").upsert({ user_id: userId, cards: cards.slice(0, 40), updated_at: new Date().toISOString() }, { onConflict: "tenant_id,user_id" }), "dashboardPrefs.save");
     },
   };
 }

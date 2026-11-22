@@ -245,6 +245,14 @@ export interface EventsRepo {
   add(tenantId: string, conversationId: string, e: { actorUserId: string | null; kind: ConversationEventKind; detail?: Record<string, unknown> }): Promise<void>;
   /** Oldest first. */
   list(tenantId: string, conversationId: string): Promise<ConversationEvent[]>;
+  /** Every event of the tenant since sinceIso (dashboard metrics), oldest first, capped by limit. */
+  listSince(tenantId: string, sinceIso: string, limit?: number): Promise<ConversationEvent[]>;
+}
+/** Per person, per business: which dashboard cards to show, in order. */
+export interface DashboardPrefsRepo {
+  /** Null when the person never customised the dashboard. */
+  get(tenantId: string, userId: string): Promise<string[] | null>;
+  save(tenantId: string, userId: string, cards: string[]): Promise<void>;
 }
 export interface NewMessage {
   direction: "in" | "out"; sender: Sender; body: string; meta?: Record<string, unknown>;
@@ -265,6 +273,8 @@ export interface MessagesRepo {
   /** Inbound dedupe: an inbound message with this provider id is already stored in the conversation. */
   hasProviderMessage(tenantId: string, conversationId: string, providerMessageId: string): Promise<boolean>;
   setCreatedAt(tenantId: string, messageId: string, at: string): Promise<void>;
+  /** Messages of the tenant created at or after sinceIso (dashboard metrics), oldest first, capped by limit. */
+  listSince(tenantId: string, sinceIso: string, limit?: number): Promise<Message[]>;
 }
 
 // ---------------- add-ons, channels, secrets ----------------
@@ -387,6 +397,7 @@ export interface DataStore {
   customers: CustomersRepo;
   notes: NotesRepo;
   events: EventsRepo;
+  dashboardPrefs: DashboardPrefsRepo;
   addons: AddonsRepo;
   channels: ChannelsRepo;
   secrets: SecretsRepo;

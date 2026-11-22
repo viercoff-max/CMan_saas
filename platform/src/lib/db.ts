@@ -223,6 +223,13 @@ export function runMigrations(db: DatabaseSync): void {
       );
       CREATE INDEX IF NOT EXISTS idx_events_conv ON conversation_events(tenant_id, conversation_id, created_at);
     `)],
+    ["dashboard_prefs", () => db.exec(`
+      CREATE TABLE IF NOT EXISTS dashboard_prefs (
+        tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, cards TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (tenant_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_events_tenant_created ON conversation_events(tenant_id, created_at);
+    `)],
   ];
   for (const [name, run] of steps) {
     try { run(); } catch (e) { console.warn(`[db] migration ${name} failed:`, e instanceof Error ? e.message : "error"); }

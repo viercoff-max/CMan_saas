@@ -72,6 +72,7 @@ export const SCHEMA: Record<string, Spec> = {
     tenant: true, unique: [pk("conversation_notes", ["id"])], defaults: () => ({ id: randomUUID(), author_user_id: null, created_at: now() }),
     refs: [{ cols: ["tenant_id", "conversation_id"], table: "conversations", to: ["tenant_id", "id"] }],
   },
+  dashboard_prefs: { tenant: true, unique: [pk("dashboard_prefs", ["tenant_id", "user_id"])], defaults: () => ({ cards: [], updated_at: now() }) },
   conversation_events: {
     tenant: true, unique: [pk("conversation_events", ["id"])], defaults: () => ({ id: randomUUID(), actor_user_id: null, detail: {}, created_at: now() }),
     refs: [{ cols: ["tenant_id", "conversation_id"], table: "conversations", to: ["tenant_id", "id"] }],

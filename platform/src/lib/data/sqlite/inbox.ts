@@ -172,4 +172,8 @@ export const messages: MessagesRepo = {
   async setCreatedAt(tenantId, messageId, at) {
     db().prepare("UPDATE messages SET created_at=? WHERE tenant_id=? AND id=?").run(at, tenantId, messageId);
   },
+  async listSince(tenantId, sinceIso, limit = 20000) {
+    return (db().prepare("SELECT * FROM messages WHERE tenant_id=? AND created_at >= ? ORDER BY created_at ASC, rowid ASC LIMIT ?")
+      .all(tenantId, sinceIso, Math.max(1, Math.min(limit, 50000))) as Row[]).map(mapMsg);
+  },
 };

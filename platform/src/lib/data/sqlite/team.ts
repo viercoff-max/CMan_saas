@@ -3,7 +3,7 @@
 import { newId, nowIso } from "../../ids";
 import type { Channel, ConversationEvent, ConversationEventKind, ConversationNote, Customer } from "../../types";
 import { normalizeCustomerPatch } from "../rules";
-import type { CustomerListItem, CustomersRepo, EventsRepo, NotesRepo } from "../types";
+import type { CustomerListItem, CustomersRepo, DashboardPrefsRepo, EventsRepo, NotesRepo } from "../types";
 import { db, json, tx, type Row } from "./conn";
 
 const tagsOf = (v: unknown): string[] => {
@@ -112,9 +112,28 @@ export const events: EventsRepo = {
   },
   async list(tenantId, conversationId) {
     return (db().prepare("SELECT * FROM conversation_events WHERE tenant_id=? AND conversation_id=? ORDER BY created_at, rowid")
-      .all(tenantId, conversationId) as Row[]).map((r): ConversationEvent => ({
-      id: r.id as string, conversationId: r.conversation_id as string, actorUserId: (r.actor_user_id as string) ?? null,
-      kind: r.kind as ConversationEventKind, detail: json(r.detail), createdAt: String(r.created_at ?? ""),
-    }));
+      .all(tenantId, conversationId) as Row[]).map(mapEvent);
+  },
+  async listSince(tenantId, sinceIso, limit = 20000) {
+    return (db().prepare("SELECT * FROM conversation_events WHERE tenant_id=? AND created_at >= ? ORDER BY created_at, rowid LIMIT ?")
+      .all(tenantId, sinceIso, Math.max(1, Math.min(limit, 50000))) as Row[]).map(mapEvent);
+  },
+};
+function mapEvent(r: Row): ConversationEvent {
+  return {
+    id: r.id as string, conversationId: r.conversation_id as string, actorUserId: (r.actor_user_id as string) ?? null,
+    kind: r.kind as ConversationEventKind, detail: json(r.detail), createdAt: String(r.created_at ?? ""),
+  };
+}
+
+export const dashboardPrefs: DashboardPrefsRepo = {
+  async get(tenantId, userId) {
+    const r = db().prepare("SELECT cards FROM dashboard_prefs WHERE tenant_id=? AND user_id=?").get(tenantId, userId) as Row | undefined;
+    return r ? tagsOf(r.cards) : null;
+  },
+  async save(tenantId, userId, cards) {
+    db().prepare(`INSERT INTO dashboard_prefs (tenant_id, user_id, cards, updated_at) VALUES (?,?,?,?)
+      ON CONFLICT(tenant_id, user_id) DO UPDATE SET cards=excluded.cards, updated_at=excluded.updated_at`)
+      .run(tenantId, userId, JSON.stringify(cards.slice(0, 40)), nowIso());
   },
 };

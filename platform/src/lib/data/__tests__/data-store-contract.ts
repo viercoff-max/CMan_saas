@@ -586,6 +586,35 @@ export function defineDataStoreContract(t: ContractTarget): void {
       });
     });
 
+    describe("dashboard: period reads and preferences", () => {
+      it("messages.listSince / events.listSince return only this tenant's rows since the date", async () => {
+        const A = await newTenant("dsa"), B = await newTenant("dsb");
+        const a = await data.conversations.getOrCreate(A, "telegram", "1");
+        const b = await data.conversations.getOrCreate(B, "telegram", "1");
+        const old = await data.messages.add(A, a.id, { direction: "in", sender: "customer", body: "viejo" });
+        await data.messages.setCreatedAt(A, old.id, OLD);
+        await data.messages.add(A, a.id, { direction: "in", sender: "customer", body: "nuevo" });
+        await data.messages.add(B, b.id, { direction: "in", sender: "customer", body: "de B" });
+        await data.events.add(A, a.id, { actorUserId: null, kind: "handoff" });
+        await data.events.add(B, b.id, { actorUserId: null, kind: "handoff" });
+        const since = "2020-01-01T00:00:00.000Z";
+        expect((await data.messages.listSince(A, since)).map((m) => m.body)).toEqual(["nuevo"]);
+        expect((await data.events.listSince(A, since)).map((e) => e.conversationId)).toEqual([a.id]);
+      });
+
+      it("prefs are per person and per business (cross-tenant negative)", async () => {
+        const A = await newTenant("dpa"), B = await newTenant("dpb");
+        const u = randomUUID(), v = randomUUID();
+        expect(await data.dashboardPrefs.get(A, u)).toBeNull();
+        await data.dashboardPrefs.save(A, u, ["waiting", "per_day"]);
+        await data.dashboardPrefs.save(A, u, ["ai"]);
+        await data.dashboardPrefs.save(B, u, ["agents"]);
+        expect(await data.dashboardPrefs.get(A, u)).toEqual(["ai"]);
+        expect(await data.dashboardPrefs.get(B, u)).toEqual(["agents"]);
+        expect(await data.dashboardPrefs.get(A, v)).toBeNull();
+      });
+    });
+
     describe("tenant status", () => {
       it("isActive, webhook routing and the AI budget follow tenants.status; other tenants are unaffected", async () => {
         const S = await newTenant("susp"), K = await newTenant("keep");

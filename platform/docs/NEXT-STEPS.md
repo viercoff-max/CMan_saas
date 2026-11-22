@@ -83,3 +83,13 @@ automáticas (endpoint con token, aislamiento entre negocios, escalamiento, env�
 tiempo máximo de espera del External Request.
 
 **Email**: tarjeta visual «Próximamente» en Canales (sin funcionalidad todavía).
+
+## Fase 4 publicada el 2026-11-22: dashboard configurable
+Inicio → «Métricas», con periodo Hoy / 7 días / 30 días y «Personalizar» (cada persona elige qué tarjetas ver y en qué
+orden; se guarda por persona y por negocio en `dashboard_prefs`). Tarjetas disponibles:
+esperando a una persona (urgentes), resueltas por el asistente (%), conversaciones, pasadas a una persona, primera
+respuesta humana (mediana), tiempo para resolver (mediana), preguntas que el asistente no supo responder (con «Agregar al
+contexto»), mensajes por día, horas pico (zona horaria del negocio), mensajes por canal, motivos de paso a persona, qué
+responde el asistente, tu equipo (respuestas y asignadas), clientes nuevos y recurrentes, fuera de horario, consultas de
+pedidos y uso de IA con costo aproximado (solo administradores; precio de referencia Haiku 0.10 / 0.50 USD por millón
+de tokens, en `dashboard/page.tsx`). Definiciones exactas: `src/lib/metrics/dashboard.ts`.
