@@ -54,12 +54,12 @@ describe("admin page guard", () => {
 describe("role-aware navigation", () => {
   const hrefs = (role: Session["role"]) => navFor(role).flatMap((g) => g.items.map((i) => i.href));
   it("agents see only Inicio, Mensajes and Plan y uso", () => {
-    expect(hrefs("agent")).toEqual(["/dashboard", "/inbox", "/billing"]);
+    expect(hrefs("agent")).toEqual(["/dashboard", "/inbox", "/customers", "/billing"]);
     expect(navFor("agent").every((g) => g.items.length > 0)).toBe(true); // empty groups dropped
   });
   it("admins and owners see everything, including Marca and Plan y uso", () => {
     for (const r of ["admin", "owner"] as const) {
-      expect(hrefs(r)).toEqual(["/dashboard", "/inbox", "/context", "/tone", "/sources", "/channels", "/addons", "/brand", "/team", "/billing"]);
+      expect(hrefs(r)).toEqual(["/dashboard", "/inbox", "/customers", "/context", "/tone", "/sources", "/channels", "/addons", "/brand", "/team", "/billing"]);
     }
   });
   it("admin-only paths", () => {

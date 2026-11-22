@@ -15,7 +15,7 @@ export function PlatformIcon({ channel, name }: { channel: Channel; name?: strin
   return <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${p.cls}`}><span aria-hidden>{p.label}</span>{name && <span className="sr-only">{name}</span>}</span>;
 }
 
-const TONE: Record<ConversationStatus, "bad" | "info" | "warn" | "good"> = { needs_human: "bad", bot: "info", human: "warn", resolved: "good" };
+const TONE: Record<ConversationStatus, "bad" | "info" | "warn" | "good"> = { needs_human: "bad", bot: "info", human: "warn", pending: "warn", waiting_customer: "info", resolved: "good" };
 export function StatusBadge({ status, label }: { status: ConversationStatus; label: string }) {
   return <Badge tone={TONE[status]}>{label}</Badge>;
 }

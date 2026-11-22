@@ -197,6 +197,32 @@ export function runMigrations(db: DatabaseSync): void {
         OR EXISTS (SELECT 1 FROM messages m WHERE m.tenant_id = conversations.tenant_id AND m.conversation_id = conversations.id
                    AND json_valid(m.meta) AND json_extract(m.meta, '$.intent') IN ('escalation_safety', 'escalation_legal')))`);
     }],
+    // Phase 1 "atención en equipo" (same shape as supabase/migrations/20261122120000_team_inbox.sql). Notes and
+    // events cascade with their conversation (PRAGMA foreign_keys = ON).
+    ["conversations.assigned_to", () => addColumnIfMissing(db, "conversations", "assigned_to", "assigned_to TEXT")],
+    ["conversations.customer_id", () => addColumnIfMissing(db, "conversations", "customer_id", "customer_id TEXT")],
+    ["team_inbox", () => db.exec(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', email TEXT, phone TEXT,
+        tags TEXT NOT NULL DEFAULT '[]', notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_customers_tenant ON customers(tenant_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_conv_tenant_customer ON conversations(tenant_id, customer_id);
+      CREATE TABLE IF NOT EXISTS conversation_notes (
+        id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        author_user_id TEXT, body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_notes_conv ON conversation_notes(tenant_id, conversation_id, created_at);
+      CREATE TABLE IF NOT EXISTS conversation_events (
+        id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        actor_user_id TEXT, kind TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_events_conv ON conversation_events(tenant_id, conversation_id, created_at);
+    `)],
   ];
   for (const [name, run] of steps) {
     try { run(); } catch (e) { console.warn(`[db] migration ${name} failed:`, e instanceof Error ? e.message : "error"); }

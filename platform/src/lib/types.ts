@@ -3,7 +3,15 @@
 export type Channel = "telegram" | "whatsapp" | "instagram" | "messenger" | "simulator";
 export const CHANNELS: Channel[] = ["telegram", "whatsapp", "instagram", "messenger", "simulator"];
 
-export type ConversationStatus = "bot" | "needs_human" | "human" | "resolved";
+/**
+ * "pending" (the team follows up later) and "waiting_customer" (the team asked the customer something) are
+ * HUMAN-OWNED like "needs_human" and "human": the bot stays silent. A customer message on "waiting_customer"
+ * moves it back to "human" (the team's turn).
+ */
+export type ConversationStatus = "bot" | "needs_human" | "human" | "pending" | "waiting_customer" | "resolved";
+export const CONVERSATION_STATUSES: ConversationStatus[] = ["bot", "needs_human", "human", "pending", "waiting_customer", "resolved"];
+export const HUMAN_OWNED_STATUSES: ReadonlySet<ConversationStatus> = new Set<ConversationStatus>(["needs_human", "human", "pending", "waiting_customer"]);
+export const emptyStatusCounts = (): Record<ConversationStatus, number> => ({ bot: 0, needs_human: 0, human: 0, pending: 0, waiting_customer: 0, resolved: 0 });
 export type Sender = "customer" | "bot" | "agent";
 
 /** Context is split into these sections. `key` is stable (DB), labels live in i18n. */
@@ -54,6 +62,24 @@ export interface Conversation {
    * code: the retention purge, customer deletion and the Meta deletion callback keep these conversations.
    */
   legalHold?: boolean;
+  /** Team member the conversation is assigned to (null = unassigned). */
+  assignedTo?: string | null;
+  /** Customer record (one person across channels). Null for simulator conversations. */
+  customerId?: string | null;
+}
+
+/** One person, possibly writing on several channels (their conversations point at it). */
+export interface Customer {
+  id: string; tenantId: string; name: string; email: string | null; phone: string | null;
+  tags: string[]; notes: string; createdAt: string; updatedAt: string;
+}
+/** Internal note on a conversation: never sent to the customer. */
+export interface ConversationNote { id: string; conversationId: string; authorUserId: string | null; body: string; createdAt: string }
+export type ConversationEventKind = "assigned" | "unassigned" | "status" | "note" | "handoff" | "customer_linked";
+/** Activity log entry: who did what to the conversation, and when. `actorUserId` null = the assistant / system. */
+export interface ConversationEvent {
+  id: string; conversationId: string; actorUserId: string | null; kind: ConversationEventKind;
+  detail: Record<string, unknown>; createdAt: string;
 }
 export interface Message {
   id: string; conversationId: string; tenantId: string; direction: "in" | "out";

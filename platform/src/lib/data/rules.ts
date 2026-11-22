@@ -48,3 +48,39 @@ export function tenantListArgs(q: { limit?: number; offset?: number; search?: st
   const search = String(q.search ?? "").trim().slice(0, 100);
   return { limit, offset, search };
 }
+
+// ---------- customers (same limits as the CHECK constraints of public.customers) ----------
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Trims and validates a customer patch; throws DataValidationError(field). Tags: trimmed, unique, max 20 x 40 chars. */
+export function normalizeCustomerPatch(p: {
+  name?: unknown; email?: unknown; phone?: unknown; tags?: unknown; notes?: unknown;
+}): { name?: string; email?: string | null; phone?: string | null; tags?: string[]; notes?: string } {
+  const out: { name?: string; email?: string | null; phone?: string | null; tags?: string[]; notes?: string } = {};
+  if (p.name !== undefined) {
+    const v = String(p.name ?? "").trim();
+    if (v.length > 200) throw new DataValidationError("name");
+    out.name = v;
+  }
+  if (p.email !== undefined) {
+    const v = String(p.email ?? "").trim().toLowerCase();
+    if (v && (v.length > 320 || !EMAIL_SHAPE.test(v))) throw new DataValidationError("email");
+    out.email = v || null;
+  }
+  if (p.phone !== undefined) {
+    const v = String(p.phone ?? "").trim();
+    if (v && (v.length > 40 || !/^[+0-9 ()\-.]{4,40}$/.test(v))) throw new DataValidationError("phone");
+    out.phone = v || null;
+  }
+  if (p.tags !== undefined) {
+    if (!Array.isArray(p.tags)) throw new DataValidationError("tags");
+    const tags = [...new Set(p.tags.map((t) => String(t ?? "").trim()).filter(Boolean))];
+    if (tags.length > 20 || tags.some((t) => t.length > 40)) throw new DataValidationError("tags");
+    out.tags = tags;
+  }
+  if (p.notes !== undefined) {
+    const v = String(p.notes ?? "");
+    if (v.length > 4000) throw new DataValidationError("notes");
+    out.notes = v;
+  }
+  return out;
+}

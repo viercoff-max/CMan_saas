@@ -1,7 +1,7 @@
 // Conversations and messages (SQLite). provider_message_id is stored in messages.meta.providerMessageId
 // (indexed by idx_msg_provider); the Supabase schema has a dedicated column with a unique index.
 import { newId, nowIso } from "../../ids";
-import type { Channel, Conversation, ConversationStatus, Message, Sender } from "../../types";
+import { emptyStatusCounts, type Channel, type Conversation, type ConversationStatus, type Message, type Sender } from "../../types";
 import { isLegalHoldReason } from "../rules";
 import type { ConversationsRepo, MessagesRepo } from "../types";
 import { db, json, tx, type Row } from "./conn";
@@ -12,7 +12,19 @@ const mapConv = (r: Row): Conversation => ({
   escalationReason: (r.escalation_reason as string) ?? null, state: json(r.state),
   lastMessageAt: r.last_message_at as string, unread: r.unread as number, createdAt: r.created_at as string,
   legalHold: Number(r.legal_hold ?? 0) === 1,
+  assignedTo: (r.assigned_to as string) ?? null, customerId: (r.customer_id as string) ?? null,
 });
+
+/** A real (non-simulator) conversation without a customer record gets one (named after the conversation). */
+function ensureCustomer(tenantId: string, convId: string, channel: string, name: string): void {
+  if (channel === "simulator") return;
+  const d = db();
+  const r = d.prepare("SELECT customer_id FROM conversations WHERE tenant_id=? AND id=?").get(tenantId, convId) as Row | undefined;
+  if (!r || r.customer_id) return;
+  const cid = newId();
+  d.prepare("INSERT INTO customers (id, tenant_id, name) VALUES (?,?,?)").run(cid, tenantId, name.slice(0, 200));
+  d.prepare("UPDATE conversations SET customer_id=? WHERE tenant_id=? AND id=? AND customer_id IS NULL").run(cid, tenantId, convId);
+}
 const mapMsg = (r: Row): Message => {
   const meta = json(r.meta);
   return {
@@ -39,11 +51,13 @@ export const conversations: ConversationsRepo = {
     const r = d.prepare("SELECT * FROM conversations WHERE tenant_id=? AND channel=? AND external_id=?").get(tenantId, channel, externalId) as Row | undefined;
     if (r) {
       if (customerName && !r.customer_name) d.prepare("UPDATE conversations SET customer_name=? WHERE tenant_id=? AND id=?").run(customerName, tenantId, r.id as string);
+      if (!r.customer_id) ensureCustomer(tenantId, r.id as string, channel, customerName || String(r.customer_name ?? ""));
       return getConv(tenantId, r.id as string)!;
     }
     const id = newId();
     d.prepare("INSERT INTO conversations (id, tenant_id, channel, external_id, customer_name) VALUES (?,?,?,?,?)")
       .run(id, tenantId, channel, externalId, customerName);
+    ensureCustomer(tenantId, id, channel, customerName);
     return getConv(tenantId, id)!;
   },
   async get(tenantId, id) { return getConv(tenantId, id); },
@@ -52,6 +66,9 @@ export const conversations: ConversationsRepo = {
     if (f.channel) { where.push("channel = ?"); args.push(f.channel); }
     if (f.status) { where.push("status = ?"); args.push(f.status); }
     if (f.search) { where.push("(customer_name LIKE ? OR external_id LIKE ?)"); args.push(`%${f.search}%`, `%${f.search}%`); }
+    if (f.assignedTo === "none") where.push("assigned_to IS NULL");
+    else if (f.assignedTo) { where.push("assigned_to = ?"); args.push(f.assignedTo); }
+    if (f.customerId) { where.push("customer_id = ?"); args.push(f.customerId); }
     args.push(f.limit ?? 200);
     return (db().prepare(`SELECT * FROM conversations WHERE ${where.join(" AND ")} ORDER BY last_message_at DESC LIMIT ?`).all(...args) as Row[]).map(mapConv);
   },
@@ -68,7 +85,7 @@ export const conversations: ConversationsRepo = {
     db().prepare("UPDATE conversations SET unread=0 WHERE tenant_id=? AND id=?").run(tenantId, id);
   },
   async countByStatus(tenantId) {
-    const out: Record<ConversationStatus, number> = { bot: 0, needs_human: 0, human: 0, resolved: 0 };
+    const out: Record<ConversationStatus, number> = emptyStatusCounts();
     for (const r of db().prepare("SELECT status, COUNT(*) c FROM conversations WHERE tenant_id=? AND channel <> 'simulator' GROUP BY status").all(tenantId) as Row[])
       out[r.status as ConversationStatus] = r.c as number;
     return out;
@@ -101,6 +118,14 @@ export const conversations: ConversationsRepo = {
     if (v.lastMessageAt !== undefined) { sets.push("last_message_at=?"); args.push(v.lastMessageAt); }
     if (!sets.length) return;
     db().prepare(`UPDATE conversations SET ${sets.join(", ")} WHERE tenant_id=? AND id=?`).run(...args, tenantId, id);
+  },
+  async assign(tenantId, id, userId) {
+    return Number(db().prepare("UPDATE conversations SET assigned_to=? WHERE tenant_id=? AND id=?").run(userId, tenantId, id).changes) === 1;
+  },
+  async setCustomer(tenantId, id, customerId) {
+    const d = db();
+    if (customerId && !d.prepare("SELECT 1 AS x FROM customers WHERE tenant_id=? AND id=?").get(tenantId, customerId)) return false;
+    return Number(d.prepare("UPDATE conversations SET customer_id=? WHERE tenant_id=? AND id=?").run(customerId, tenantId, id).changes) === 1;
   },
 };
 

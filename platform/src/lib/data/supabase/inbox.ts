@@ -4,7 +4,7 @@
 //   * last_message_at / unread are bumped by the conversation_touch RPC (atomic unread + 1; PostgREST cannot do it).
 //   * Deleting a conversation goes through retention_delete_conversations (one transaction).
 import { nowIso } from "../../ids";
-import type { ConversationStatus } from "../../types";
+import { CONVERSATION_STATUSES, emptyStatusCounts, type ConversationStatus } from "../../types";
 import { isLegalHoldReason } from "../rules";
 import type { ConversationsRepo, MessagesRepo } from "../types";
 import { isUuid, scoped, type Db, type Row, type Scoped } from "./client";
@@ -12,9 +12,9 @@ import {
   UQ_MSG_PROVIDER, allRows, cap, count, escapeLike, isUniqueViolation, mapConversation, mapDbError, mapMessage, obj, one, rows, run,
 } from "./map";
 
-const CONV_COLS = "id, tenant_id, channel, external_id, customer_name, status, escalation_reason, state, last_message_at, unread, legal_hold, created_at";
+const CONV_COLS = "id, tenant_id, channel, external_id, customer_name, status, escalation_reason, state, last_message_at, unread, legal_hold, assigned_to, customer_id, created_at";
 const MSG_COLS = "id, conversation_id, tenant_id, direction, sender, body, meta, provider_message_id, created_at";
-const STATUSES: ConversationStatus[] = ["bot", "needs_human", "human", "resolved"];
+const STATUSES: ConversationStatus[] = CONVERSATION_STATUSES;
 
 async function getConv(s: Scoped, id: string) {
   if (!isUuid(id)) return null;
@@ -29,6 +29,15 @@ export async function deleteConversationsRpc(s: Scoped, ids: string[], ctx: stri
   return { conversations: Number(r.conversations ?? 0), messages: Number(r.messages ?? 0) };
 }
 
+/** A real (non-simulator) conversation without a customer record gets one, named after the conversation. */
+async function ensureCustomer(s: Scoped, r: Row): Promise<Row> {
+  if (r.channel === "simulator" || r.customer_id) return r;
+  const c = await one(s.from("customers").insert({ name: cap(String(r.customer_name ?? ""), 200) }).select("id").maybeSingle(), "conversations.ensureCustomer");
+  if (!c) return r;
+  await run(s.from("conversations").update({ customer_id: c.id }).eq("id", r.id).is("customer_id", null), "conversations.ensureCustomer");
+  return { ...r, customer_id: c.id };
+}
+
 export function conversationsRepo(db: Db): ConversationsRepo {
   return {
     async getOrCreate(tenantId, channel, externalId, customerName = "") {
@@ -40,7 +49,7 @@ export function conversationsRepo(db: Db): ConversationsRepo {
           await run(s.from("conversations").update({ customer_name: cap(customerName, 200) }).eq("id", r.id), "conversations.getOrCreate");
           r = { ...r, customer_name: cap(customerName, 200) };
         }
-        return mapConversation(r);
+        return mapConversation(await ensureCustomer(s, r));
       }
       const ins = await s.from("conversations").insert({ channel, external_id: externalId, customer_name: cap(customerName, 200) }).select(CONV_COLS).maybeSingle();
       if (ins.error) {
@@ -48,7 +57,7 @@ export function conversationsRepo(db: Db): ConversationsRepo {
         if (isUniqueViolation(ins.error)) { r = await find(); if (r) return mapConversation(r); }
         throw mapDbError(ins.error, "conversations.getOrCreate");
       }
-      return mapConversation(ins.data as Row);
+      return mapConversation(await ensureCustomer(s, ins.data as Row));
     },
     async get(tenantId, id) { return getConv(scoped(db, tenantId), id); },
     async list(tenantId, f = {}) {
@@ -58,6 +67,9 @@ export function conversationsRepo(db: Db): ConversationsRepo {
         let q = s.from("conversations").select(CONV_COLS);
         if (f.channel) q = q.eq("channel", f.channel);
         if (f.status) q = q.eq("status", f.status);
+        if (f.assignedTo === "none") q = q.is("assigned_to", null);
+        else if (f.assignedTo) q = isUuid(f.assignedTo) ? q.eq("assigned_to", f.assignedTo) : q.eq("id", "00000000-0000-0000-0000-000000000000");
+        if (f.customerId) q = isUuid(f.customerId) ? q.eq("customer_id", f.customerId) : q.eq("id", "00000000-0000-0000-0000-000000000000");
         return q;
       };
       const ordered = (q: ReturnType<typeof base>) => q.order("last_message_at", { ascending: false }).order("id").limit(limit);
@@ -95,7 +107,7 @@ export function conversationsRepo(db: Db): ConversationsRepo {
       const s = scoped(db, tenantId);
       const counts = await Promise.all(STATUSES.map((st) =>
         count(s.from("conversations").select("id", { count: "exact", head: true }).eq("status", st).neq("channel", "simulator"), "conversations.countByStatus")));
-      const out: Record<ConversationStatus, number> = { bot: 0, needs_human: 0, human: 0, resolved: 0 };
+      const out: Record<ConversationStatus, number> = emptyStatusCounts();
       STATUSES.forEach((st, i) => { out[st] = counts[i]; });
       return out;
     },
@@ -120,6 +132,18 @@ export function conversationsRepo(db: Db): ConversationsRepo {
       const s = scoped(db, tenantId);
       return (await allRows(() => s.from("conversations").select("id").like("external_id", `${escapeLike(prefix)}%`).order("id"), "conversations.listIdsByExternalPrefix"))
         .map((r) => r.id as string);
+    },
+    async assign(tenantId, id, userId) {
+      if (!isUuid(id) || (userId !== null && !isUuid(userId))) return false;
+      const r = await rows(scoped(db, tenantId).from("conversations").update({ assigned_to: userId }).eq("id", id).select("id"), "conversations.assign");
+      return r.length === 1;
+    },
+    async setCustomer(tenantId, id, customerId) {
+      if (!isUuid(id) || (customerId !== null && !isUuid(customerId))) return false;
+      const s = scoped(db, tenantId);
+      if (customerId && !(await one(s.from("customers").select("id").eq("id", customerId).maybeSingle(), "conversations.setCustomer"))) return false;
+      const r = await rows(s.from("conversations").update({ customer_id: customerId }).eq("id", id).select("id"), "conversations.setCustomer");
+      return r.length === 1;
     },
     async setTimestamps(tenantId, id, v) {
       if (!isUuid(id)) return;

@@ -1,6 +1,6 @@
 // Pure conversation classification shared by the inbox list/route, the dashboard, the sidebar badge and billing.
 // One source of truth so every screen counts "waiting" and "urgent" the same way (REVIEW-qa-2 P1-6, P2-1).
-import type { Conversation, ConversationStatus } from "@/lib/types";
+import { emptyStatusCounts, type Conversation, type ConversationStatus } from "@/lib/types";
 
 /** External-id prefix written by the local demo seed (`src/lib/demo/content.ts` DEMO_PREFIX). */
 export const DEMO_EXTERNAL_PREFIX = "demo-";
@@ -34,7 +34,7 @@ export interface InboxCounts { counts: Record<ConversationStatus, number>; urgen
 
 /** Counts for real-customer conversations (the simulator never counts). */
 export function summarize(rows: Pick<Conversation, "channel" | "status" | "escalationReason">[]): InboxCounts {
-  const counts: Record<ConversationStatus, number> = { bot: 0, needs_human: 0, human: 0, resolved: 0 };
+  const counts: Record<ConversationStatus, number> = emptyStatusCounts();
   let urgent = 0;
   for (const c of rows) {
     if (c.channel === "simulator") continue;

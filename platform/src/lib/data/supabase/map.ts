@@ -172,6 +172,7 @@ export function mapConversation(r: Row): Conversation {
     escalationReason: (r.escalation_reason as string) ?? null, state: obj(r.state),
     lastMessageAt: isoOr(r.last_message_at), unread: Number(r.unread ?? 0), createdAt: isoOr(r.created_at),
     legalHold: r.legal_hold === true,
+    assignedTo: (r.assigned_to as string) ?? null, customerId: (r.customer_id as string) ?? null,
   };
 }
 export function mapMessage(r: Row): Message {

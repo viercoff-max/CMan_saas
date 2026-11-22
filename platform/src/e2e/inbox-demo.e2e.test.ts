@@ -88,7 +88,7 @@ describe("inbox: one source of truth for waiting / urgent counts", () => {
 
     // cross-tenant negative: another tenant sees none of it
     const other = await newTenant("Otra marca");
-    expect(await loadInboxCounts(other.tenantId)).toEqual({ counts: { bot: 0, needs_human: 0, human: 0, resolved: 0 }, urgent: 0 });
+    expect(await loadInboxCounts(other.tenantId)).toEqual({ counts: { bot: 0, needs_human: 0, human: 0, pending: 0, waiting_customer: 0, resolved: 0 }, urgent: 0 });
     asUser(other);
     const otherApi = await list();
     expect(otherApi.conversations).toHaveLength(0);

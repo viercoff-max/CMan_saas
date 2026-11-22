@@ -61,7 +61,20 @@ export const SCHEMA: Record<string, Spec> = {
   tenant_secrets: { tenant: true, unique: [pk("tenant_secrets", ["tenant_id", "kind", "key"])], defaults: () => ({ config_enc: null, webhook_secret_hash: null, updated_at: now() }) },
   conversations: {
     tenant: true, unique: [pk("conversations", ["id"]), uq("conversations", ["tenant_id", "channel", "external_id"]), uq("conversations", ["tenant_id", "id"])],
-    defaults: () => ({ id: randomUUID(), customer_name: "", status: "bot", escalation_reason: null, assigned_to: null, state: {}, last_message_at: now(), last_inbound_at: null, unread: 0, legal_hold: false, created_at: now() }),
+    defaults: () => ({ id: randomUUID(), customer_name: "", status: "bot", escalation_reason: null, assigned_to: null, customer_id: null, state: {}, last_message_at: now(), last_inbound_at: null, unread: 0, legal_hold: false, created_at: now() }),
+    refs: [{ cols: ["tenant_id", "customer_id"], table: "customers", to: ["tenant_id", "id"] }],
+  },
+  customers: {
+    tenant: true, unique: [pk("customers", ["id"]), uq("customers", ["tenant_id", "id"])],
+    defaults: () => ({ id: randomUUID(), name: "", email: null, phone: null, tags: [], notes: "", created_at: now(), updated_at: now() }),
+  },
+  conversation_notes: {
+    tenant: true, unique: [pk("conversation_notes", ["id"])], defaults: () => ({ id: randomUUID(), author_user_id: null, created_at: now() }),
+    refs: [{ cols: ["tenant_id", "conversation_id"], table: "conversations", to: ["tenant_id", "id"] }],
+  },
+  conversation_events: {
+    tenant: true, unique: [pk("conversation_events", ["id"])], defaults: () => ({ id: randomUUID(), actor_user_id: null, detail: {}, created_at: now() }),
+    refs: [{ cols: ["tenant_id", "conversation_id"], table: "conversations", to: ["tenant_id", "id"] }],
   },
   messages: {
     tenant: true,
@@ -386,6 +399,8 @@ const RPCS: Record<string, (db: FakeSupabase, a: Row) => unknown> = {
     db.tables.messages = db.tables.messages.filter((m) => !(m.tenant_id === tid && ids.includes(String(m.conversation_id))));
     messagesDeleted += b2 - db.tables.messages.length;
     const b3 = db.tables.conversations.length;
+    // ON DELETE CASCADE (migration 20261122120000_team_inbox): notes and events go with their conversation.
+    for (const t of ["conversation_notes", "conversation_events"] as const) db.tables[t] = db.tables[t].filter((r) => !(r.tenant_id === tid && ids.includes(String(r.conversation_id))));
     db.tables.conversations = db.tables.conversations.filter((c) => !(c.tenant_id === tid && ids.includes(String(c.id))));
     let messagesMasked = 0;
     for (const m of db.tables.messages) {
@@ -402,6 +417,8 @@ const RPCS: Record<string, (db: FakeSupabase, a: Row) => unknown> = {
     const m0 = db.tables.messages.length, c0 = db.tables.conversations.length;
     db.tables.messages = db.tables.messages.filter((m) => !(m.tenant_id === tid && ids.includes(String(m.conversation_id))));
     db.tables.engine_inbound_log = db.tables.engine_inbound_log.filter((l) => !(l.tenant_id === tid && ids.includes(String(l.conversation_id))));
+    // ON DELETE CASCADE (migration 20261122120000_team_inbox): notes and events go with their conversation.
+    for (const t of ["conversation_notes", "conversation_events"] as const) db.tables[t] = db.tables[t].filter((r) => !(r.tenant_id === tid && ids.includes(String(r.conversation_id))));
     db.tables.conversations = db.tables.conversations.filter((c) => !(c.tenant_id === tid && ids.includes(String(c.id))));
     return { conversations: c0 - db.tables.conversations.length, messages: m0 - db.tables.messages.length };
   },

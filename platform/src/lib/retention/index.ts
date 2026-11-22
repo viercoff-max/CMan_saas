@@ -49,6 +49,8 @@ export async function purgeOldData(tenantId?: string, now: Date = new Date()): P
     const p = await data.retention.purgeTenant(t, { cutoff, maskCutoff, maskedBody: MASKED_BODY });
     const msgs = p.messagesDeleted, convs = p.conversationsDeleted, masked = p.messagesMasked;
     const files = await deleteOutboxFor(t, p.deletedConversationIds);
+    // Customer records left without any conversation hold personal data (name, email, phone): delete them too.
+    if (convs) await data.customers.deleteOrphans(t).catch(() => console.error("[retention] orphan customers cleanup failed"));
     res.messagesDeleted += msgs; res.conversationsDeleted += convs; res.messagesMasked += masked; res.outboxFilesDeleted += files;
     if (msgs || convs || masked || files)
       await data.audit.log(t, "system", "retention.purge", JSON.stringify({ days, messages: msgs, conversations: convs, masked, outbox: files }));
@@ -85,6 +87,7 @@ export async function deleteCustomerData(tenantId: string, channel: string, exte
   const del = convs.filter((c) => opts.force || !isHeld(c));
   const { messages, conversations } = await data.retention.deleteConversations(tenantId, del.map((c) => c.id));
   const outboxFiles = await deleteOutboxFor(tenantId, del.map((c) => c.id), del.length ? [externalId] : []);
+  if (conversations) await data.customers.deleteOrphans(tenantId).catch(() => console.error("[retention] orphan customers cleanup failed"));
   await data.audit.log(tenantId, opts.actor ?? "system", "privacy.customer_deleted",
     JSON.stringify({ ref, channel, conversations, messages, outbox: outboxFiles, held: held.length, forced: !!opts.force }));
   return { conversations, messages, outboxFiles, heldConversations: held.length, ref };

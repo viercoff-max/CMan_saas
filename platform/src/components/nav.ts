@@ -9,6 +9,7 @@ export const NAV_GROUPS: NavGroup[] = [
   { key: "nav.group.attention", items: [
     { href: "/dashboard", key: "nav.dashboard", icon: "🏠" },
     { href: "/inbox", key: "nav.inbox", icon: "💬" },
+    { href: "/customers", key: "nav.customers", icon: "🧑" },
   ] },
   { key: "nav.group.assistant", items: [
     { href: "/context", key: "nav.context", icon: "📝", admin: true },

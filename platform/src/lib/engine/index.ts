@@ -1,7 +1,7 @@
 // Conversation engine: one entry point for webhooks and the simulator.
 // Pipeline: dedupe -> store inbound -> silence checks -> language -> deterministic escalation -> pending offer
 //           -> order flow (templates only) -> knowledge (retrieval + LLM + validator) -> cross-sell -> store reply.
-import type { AgentSettings, Conversation, EngineReply, InboundEvent, OrdersConnector } from "../types";
+import { HUMAN_OWNED_STATUSES, type AgentSettings, type Conversation, type EngineReply, type InboundEvent, type OrdersConnector } from "../types";
 import { getData } from "../data";
 import { ALWAYS_ON_SECTIONS, getEffectiveSectionContent } from "../context/section-repo";
 import { getOrdersConnector as defaultGetOrdersConnector } from "../connectors/registry";
@@ -94,7 +94,15 @@ export async function handleInbound(ev: EngineInboundEvent, deps: EngineDeps = {
   });
 
   const settings = await data.settings.get(tenantId);
-  if (conv.status === "needs_human" || conv.status === "human") return { text: "", escalated: false };
+  // Human-owned conversations (needs_human, human, pending, waiting_customer): the bot stays silent. The customer
+  // answered what the team asked ("waiting_customer"): it is the team's turn again.
+  if (HUMAN_OWNED_STATUSES.has(conv.status)) {
+    if (conv.status === "waiting_customer") {
+      await data.conversations.setStatus(tenantId, conv.id, "human");
+      await data.events.add(tenantId, conv.id, { actorUserId: null, kind: "status", detail: { from: "waiting_customer", to: "human" } }).catch(() => undefined);
+    }
+    return { text: "", escalated: false };
+  }
   if (!settings.botEnabled) {
     // Put it in the human queue once so nobody is left unanswered; the bot stays silent.
     await data.conversations.setStatus(tenantId, conv.id, "needs_human", "bot_disabled");
@@ -391,6 +399,7 @@ async function escalate(
   const data = getData();
   await data.conversations.setState(ctx.tenantId, ctx.conv.id, state as Record<string, unknown>);
   await data.conversations.setStatus(ctx.tenantId, ctx.conv.id, "needs_human", reason);
+  await data.events.add(ctx.tenantId, ctx.conv.id, { actorUserId: null, kind: "handoff", detail: { reason } }).catch(() => undefined);
   await data.messages.add(ctx.tenantId, ctx.conv.id, {
     direction: "out", sender: "bot", body: text,
     meta: clean({ ...meta, lang: ctx.lang, escalated: true, escalationReason: reason, outsideHours: open === false || undefined }),

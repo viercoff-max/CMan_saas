@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Card, inputCls } from "@/components/ui";
 import { useT } from "@/lib/i18n-client";
-import type { Conversation, Message } from "@/lib/types";
+import { HUMAN_OWNED_STATUSES, type Conversation, type Message } from "@/lib/types";
 import { inboxDict } from "./dict";
 
 const ON_BRAND = "text-[var(--on-brand,#fff)]";
@@ -53,7 +53,7 @@ export function Simulator({ onClose, onChanged }: { onClose: () => void; onChang
   }
 
   // After a handoff nothing answers any more: lock the input and make "Empezar de nuevo" the main action (P2-9).
-  const withPerson = !!conv && (conv.status === "human" || conv.status === "needs_human");
+  const withPerson = !!conv && HUMAN_OWNED_STATUSES.has(conv.status);
   const locked = busy || withPerson;
   return (
     <Card className="flex w-full flex-col p-0">

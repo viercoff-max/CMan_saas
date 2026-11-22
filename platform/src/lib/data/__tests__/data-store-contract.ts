@@ -102,7 +102,7 @@ export function defineDataStoreContract(t: ContractTarget): void {
         expect(await data.conversations.list(A)).toEqual([]);
         expect(await data.conversations.findIdByExternal(A, "whatsapp", "5215500000000")).toBeNull();
         expect(await data.conversations.listIdsByExternalPrefix(A, "521")).toEqual([]);
-        expect(await data.conversations.countByStatus(A)).toEqual({ bot: 0, needs_human: 0, human: 0, resolved: 0 });
+        expect(await data.conversations.countByStatus(A)).toEqual({ bot: 0, needs_human: 0, human: 0, pending: 0, waiting_customer: 0, resolved: 0 });
         expect(await data.messages.list(A, bConv)).toEqual([]);
         expect(await data.messages.recent(A, bConv, 10)).toEqual([]);
         expect((await data.messages.latest(A, [bConv])).size).toBe(0);
@@ -400,7 +400,7 @@ export function defineDataStoreContract(t: ContractTarget): void {
         await data.conversations.setStatus(T, b.id, "needs_human", "human_request");
         await data.conversations.setStatus(T, b.id, "human"); // reason kept
         expect((await data.conversations.get(T, b.id))?.escalationReason).toBe("human_request");
-        expect(await data.conversations.countByStatus(T)).toEqual({ bot: 1, needs_human: 0, human: 1, resolved: 0 });
+        expect(await data.conversations.countByStatus(T)).toEqual({ bot: 1, needs_human: 0, human: 1, pending: 0, waiting_customer: 0, resolved: 0 });
         expect((await data.conversations.list(T, { channel: "messenger" })).map((c) => c.id)).toEqual([b.id]);
         expect((await data.conversations.list(T, { status: "human" })).map((c) => c.id)).toEqual([b.id]);
         expect((await data.conversations.list(T, { search: "lup" })).map((c) => c.id)).toEqual([a.id]);
@@ -475,6 +475,117 @@ export function defineDataStoreContract(t: ContractTarget): void {
     });
 
     // L1 (REVIEW-security-2): suspended / deleted tenants get no webhook routing and no AI budget.
+    describe("team inbox: customers, notes, activity, assignment", () => {
+      it("a real conversation gets a customer record; the simulator never does", async () => {
+        const T = await newTenant("cust");
+        const c = await data.conversations.getOrCreate(T, "telegram", "4242", "Ana López");
+        expect(c.customerId).toBeTruthy();
+        const cust = await data.customers.get(T, c.customerId!);
+        expect(cust?.name).toBe("Ana López");
+        expect((await data.conversations.getOrCreate(T, "telegram", "4242")).customerId).toBe(c.customerId);
+        const sim = await data.conversations.getOrCreate(T, "simulator", "sim-1", "Prueba");
+        expect(sim.customerId ?? null).toBeNull();
+        const list = await data.customers.list(T);
+        expect(list).toHaveLength(1);
+        expect(list[0]).toMatchObject({ id: c.customerId, conversations: 1, channels: ["telegram"] });
+        expect((await data.conversations.list(T, { customerId: c.customerId! })).map((x) => x.id)).toEqual([c.id]);
+      });
+
+      it("customer update validates like the database; merge moves conversations and deletes the merged record", async () => {
+        const T = await newTenant("merge");
+        const a = await data.conversations.getOrCreate(T, "telegram", "1", "Ana");
+        const b = await data.conversations.getOrCreate(T, "whatsapp", "5215500000000", "");
+        const up = await data.customers.update(T, a.customerId!, { email: " ANA@Example.test ", phone: "+52 55 1234 5678", tags: ["vip", " vip ", "garantía"], notes: "Prefiere WhatsApp" });
+        expect(up).toMatchObject({ email: "ana@example.test", phone: "+52 55 1234 5678", tags: ["vip", "garantía"], notes: "Prefiere WhatsApp" });
+        await expect(data.customers.update(T, a.customerId!, { email: "no-es-correo" })).rejects.toBeInstanceOf(DataValidationError);
+        await expect(data.customers.update(T, a.customerId!, { tags: Array.from({ length: 21 }, (_, i) => `t${i}`) })).rejects.toBeInstanceOf(DataValidationError);
+        await data.customers.update(T, b.customerId!, { tags: ["mayoreo"] });
+        expect(await data.customers.merge(T, b.customerId!, a.customerId!)).toBe(true);
+        expect(await data.customers.get(T, b.customerId!)).toBeNull();
+        expect((await data.conversations.get(T, b.id))?.customerId).toBe(a.customerId);
+        expect((await data.customers.get(T, a.customerId!))?.tags.sort()).toEqual(["garantía", "mayoreo", "vip"]);
+        expect(await data.customers.merge(T, a.customerId!, a.customerId!)).toBe(false);
+      });
+
+      it("orphan customers are deleted once their last conversation is gone", async () => {
+        const T = await newTenant("orphan");
+        const c = await data.conversations.getOrCreate(T, "telegram", "77", "Beto");
+        const keep = await data.conversations.getOrCreate(T, "telegram", "78", "Caro");
+        await data.conversations.delete(T, c.id);
+        expect(await data.customers.deleteOrphans(T)).toBe(1);
+        expect(await data.customers.get(T, c.customerId!)).toBeNull();
+        expect(await data.customers.get(T, keep.customerId!)).not.toBeNull();
+      });
+
+      it("notes and events: listed in order, only the author deletes a note, gone with the conversation", async () => {
+        const T = await newTenant("notes");
+        const c = await data.conversations.getOrCreate(T, "telegram", "90", "Dani");
+        const u1 = randomUUID(), u2 = randomUUID();
+        const n1 = await data.notes.add(T, c.id, { authorUserId: u1, body: "Cliente molesto, llamar mañana" });
+        await data.notes.add(T, c.id, { authorUserId: u2, body: "Ya le marqué" });
+        expect((await data.notes.list(T, c.id)).map((n) => n.body)).toEqual(["Cliente molesto, llamar mañana", "Ya le marqué"]);
+        expect(await data.notes.remove(T, n1!.id, u2)).toBe(false); // not the author
+        expect(await data.notes.remove(T, n1!.id, u1)).toBe(true);
+        await data.events.add(T, c.id, { actorUserId: null, kind: "handoff", detail: { reason: "safety" } });
+        await data.events.add(T, c.id, { actorUserId: u1, kind: "status", detail: { from: "needs_human", to: "human" } });
+        const ev = await data.events.list(T, c.id);
+        expect(ev.map((e) => e.kind)).toEqual(["handoff", "status"]);
+        expect(ev[0].detail).toEqual({ reason: "safety" });
+        await data.conversations.delete(T, c.id);
+        expect(await data.notes.list(T, c.id)).toEqual([]);
+        expect(await data.events.list(T, c.id)).toEqual([]);
+      });
+
+      it("new statuses: pending and waiting_customer are stored, filtered and counted", async () => {
+        const T = await newTenant("status2");
+        const c = await data.conversations.getOrCreate(T, "telegram", "91");
+        await data.conversations.setStatus(T, c.id, "pending");
+        expect((await data.conversations.list(T, { status: "pending" })).map((x) => x.id)).toEqual([c.id]);
+        await data.conversations.setStatus(T, c.id, "waiting_customer");
+        expect((await data.conversations.countByStatus(T)).waiting_customer).toBe(1);
+      });
+
+      it("assignment: assign / unassign, filter by assignee and unassigned", async () => {
+        const T = await newTenant("assign");
+        const user = t.addMember ? await t.addMember(T, `agent-${randomUUID()}@example.test`, "Agente") : randomUUID();
+        const c = await data.conversations.getOrCreate(T, "telegram", "92");
+        const d = await data.conversations.getOrCreate(T, "telegram", "93");
+        expect(await data.conversations.assign(T, c.id, user)).toBe(true);
+        expect((await data.conversations.get(T, c.id))?.assignedTo).toBe(user);
+        expect((await data.conversations.list(T, { assignedTo: user })).map((x) => x.id)).toEqual([c.id]);
+        expect((await data.conversations.list(T, { assignedTo: "none" })).map((x) => x.id)).toEqual([d.id]);
+        expect(await data.conversations.assign(T, c.id, null)).toBe(true);
+        expect((await data.conversations.get(T, c.id))?.assignedTo ?? null).toBeNull();
+      });
+
+      it("cross-tenant negative: A cannot read, change, merge, link or annotate B's customers and conversations", async () => {
+        const A = await newTenant("ta"), B = await newTenant("tb");
+        const b = await data.conversations.getOrCreate(B, "telegram", "500", "Cliente de B");
+        const a = await data.conversations.getOrCreate(A, "telegram", "501", "Cliente de A");
+        await data.notes.add(B, b.id, { authorUserId: null, body: "nota de B" });
+        await data.events.add(B, b.id, { actorUserId: null, kind: "handoff" });
+        expect(await data.customers.get(A, b.customerId!)).toBeNull();
+        expect((await data.customers.list(A)).map((c) => c.id)).toEqual([a.customerId]);
+        expect(await data.customers.update(A, b.customerId!, { name: "hack" })).toBeNull();
+        expect(await data.customers.merge(A, b.customerId!, a.customerId!)).toBe(false);
+        expect(await data.customers.merge(A, a.customerId!, b.customerId!)).toBe(false);
+        expect(await data.conversations.setCustomer(A, a.id, b.customerId!)).toBe(false);
+        expect(await data.conversations.setCustomer(A, b.id, a.customerId!)).toBe(false);
+        expect(await data.conversations.assign(A, b.id, randomUUID())).toBe(false);
+        expect(await data.notes.add(A, b.id, { authorUserId: null, body: "x" })).toBeNull();
+        expect(await data.notes.list(A, b.id)).toEqual([]);
+        await data.events.add(A, b.id, { actorUserId: null, kind: "note" });
+        expect(await data.events.list(A, b.id)).toEqual([]);
+        expect(await data.conversations.list(A, { customerId: b.customerId! })).toEqual([]);
+        expect(await data.customers.deleteOrphans(A)).toBe(0);
+        // B untouched
+        expect((await data.customers.get(B, b.customerId!))?.name).toBe("Cliente de B");
+        expect(await data.notes.list(B, b.id)).toHaveLength(1);
+        expect(await data.events.list(B, b.id)).toHaveLength(1);
+        expect((await data.conversations.get(B, b.id))?.assignedTo ?? null).toBeNull();
+      });
+    });
+
     describe("tenant status", () => {
       it("isActive, webhook routing and the AI budget follow tenants.status; other tenants are unaffected", async () => {
         const S = await newTenant("susp"), K = await newTenant("keep");

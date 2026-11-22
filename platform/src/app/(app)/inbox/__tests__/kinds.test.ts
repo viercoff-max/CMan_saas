@@ -41,7 +41,7 @@ describe("inbox kinds", () => {
       conv({ status: "human" }),
       conv({ channel: "simulator", status: "needs_human", escalationReason: "safety" }),
     ]);
-    expect(s).toEqual({ counts: { bot: 0, needs_human: 2, human: 1, resolved: 0 }, urgent: 1 });
+    expect(s).toEqual({ counts: { bot: 0, needs_human: 2, human: 1, pending: 0, waiting_customer: 0, resolved: 0 }, urgent: 1 });
   });
 
   it("every escalation reason (incl. ai_cap_reached) has a label in both languages", () => {

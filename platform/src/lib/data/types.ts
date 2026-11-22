@@ -8,7 +8,8 @@
 // NOTE: relative, type-only imports here (the CLI scripts load src/lib with Node's type stripping).
 import type {
   AddonKey, Addon, AgentSettings, Channel, ChannelAccount, Chunk, ContextSection, ContextSectionKey, Conversation,
-  ConversationStatus, Message, Sender, Source, SourceKind, SourceStatus,
+  ConversationEvent, ConversationEventKind, ConversationNote, ConversationStatus, Customer, Message, Sender, Source,
+  SourceKind, SourceStatus,
 } from "../types";
 
 export type DataBackend = "sqlite" | "supabase";
@@ -187,7 +188,8 @@ export interface ChunksRepo {
 }
 
 // ---------------- inbox ----------------
-export interface ConversationFilter { channel?: Channel; status?: ConversationStatus; search?: string; limit?: number }
+/** `assignedTo`: a user id, or "none" for unassigned. `customerId`: the conversations of one customer. */
+export interface ConversationFilter { channel?: Channel; status?: ConversationStatus; search?: string; limit?: number; assignedTo?: string; customerId?: string }
 export interface ConversationsRepo {
   getOrCreate(tenantId: string, channel: Channel, externalId: string, customerName?: string): Promise<Conversation>;
   get(tenantId: string, id: string): Promise<Conversation | null>;
@@ -209,6 +211,40 @@ export interface ConversationsRepo {
   listIdsByExternalPrefix(tenantId: string, prefix: string): Promise<string[]>;
   /** Backfill timestamps/unread (demo seed). */
   setTimestamps(tenantId: string, id: string, v: { unread?: number; createdAt?: string; lastMessageAt?: string }): Promise<void>;
+  /**
+   * Assign to a team member (null = unassign). The CALLER checks the user is a member of this tenant; Supabase also
+   * refuses a non-member in the database (trigger). False when the conversation is not this tenant's.
+   */
+  assign(tenantId: string, id: string, userId: string | null): Promise<boolean>;
+  /** Point the conversation at a customer of THIS tenant (null = unlink). False when either is not this tenant's. */
+  setCustomer(tenantId: string, id: string, customerId: string | null): Promise<boolean>;
+}
+
+export interface CustomerListItem extends Customer { conversations: number; channels: Channel[]; lastMessageAt: string | null }
+export type CustomerPatch = Partial<Pick<Customer, "name" | "email" | "phone" | "tags" | "notes">>;
+export interface CustomersRepo {
+  /** Latest activity first; `search` matches name, email or phone (literal, case-insensitive). */
+  list(tenantId: string, q?: { search?: string; limit?: number }): Promise<CustomerListItem[]>;
+  get(tenantId: string, id: string): Promise<Customer | null>;
+  create(tenantId: string, c: { name?: string }): Promise<Customer>;
+  /** Validated like the DB checks (lengths, at most 20 tags); throws DataValidationError. Null when not this tenant's. */
+  update(tenantId: string, id: string, patch: CustomerPatch): Promise<Customer | null>;
+  /** Moves every conversation of `fromId` to `intoId` (both this tenant's), merges tags/notes, deletes `fromId`. */
+  merge(tenantId: string, fromId: string, intoId: string): Promise<boolean>;
+  /** Customers with no conversation left (after a purge or a customer deletion) are deleted. Returns how many. */
+  deleteOrphans(tenantId: string): Promise<number>;
+}
+export interface NotesRepo {
+  list(tenantId: string, conversationId: string): Promise<ConversationNote[]>;
+  /** Null when the conversation is not this tenant's. */
+  add(tenantId: string, conversationId: string, n: { authorUserId: string | null; body: string }): Promise<ConversationNote | null>;
+  /** Only the author may delete their note. */
+  remove(tenantId: string, noteId: string, authorUserId: string): Promise<boolean>;
+}
+export interface EventsRepo {
+  add(tenantId: string, conversationId: string, e: { actorUserId: string | null; kind: ConversationEventKind; detail?: Record<string, unknown> }): Promise<void>;
+  /** Oldest first. */
+  list(tenantId: string, conversationId: string): Promise<ConversationEvent[]>;
 }
 export interface NewMessage {
   direction: "in" | "out"; sender: Sender; body: string; meta?: Record<string, unknown>;
@@ -348,6 +384,9 @@ export interface DataStore {
   chunks: ChunksRepo;
   conversations: ConversationsRepo;
   messages: MessagesRepo;
+  customers: CustomersRepo;
+  notes: NotesRepo;
+  events: EventsRepo;
   addons: AddonsRepo;
   channels: ChannelsRepo;
   secrets: SecretsRepo;
