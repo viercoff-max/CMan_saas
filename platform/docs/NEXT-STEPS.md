@@ -106,3 +106,16 @@ Menú → «Notificaciones» (todas las personas del equipo):
   de los navegadores (lista permitida). Las llaves VAPID se derivan de `APP_SECRET` (no hay variable nueva; si se rota
   `APP_SECRET`, cada persona vuelve a activar sus avisos).
 - Avisos guardados 30 días (purga). Pendiente: avisos por correo (requiere Resend) y por WhatsApp/Telegram al encargado.
+
+## Consola de la plataforma publicada el 2026-11-23 (solo para los dueños de la plataforma)
+- `/platform` (Resumen), `/platform/tenants` (Negocios con filtros), `/platform/tenants/<id>` (ficha y acciones),
+  `/platform/compliance` (Cumplimiento) y `/platform/audit` (Bitácora). Cualquier otra persona recibe 404.
+- Acciones: suspender (motivo + escribir la dirección corta), reactivar, cambiar plan, ajustar tope de IA, borrar demo y
+  levantar una retención legal (motivo obligatorio; atómico con su registro). Todo queda en la bitácora con códigos, sin
+  texto libre. Máximo 60 acciones por hora por administrador.
+- Datos: migración `20261123100000_platform_console.sql` (`platform_stats`, `platform_lift_legal_hold`, solo
+  service_role; prueba `supabase/tests/platform_console.sql`). Solo conteos: nunca mensajes ni datos de clientes finales.
+- Costo de IA: estimado con precios de lista de Claude Haiku 5.5 (`AI_PRICE_INPUT_PER_MTOK` / `AI_PRICE_OUTPUT_PER_MTOK`
+  para cambiarlos). "IA hoy" es lo reservado contra `PLATFORM_DAILY_TOKEN_CAP` (cota superior, no el gasto exacto).
+- Pendiente: registrar solicitudes ARCO manuales (hoy se ven las que cada negocio atiende y las de Meta), pestaña de
+  configuración (administradores de la plataforma), soporte asistido y facturación.

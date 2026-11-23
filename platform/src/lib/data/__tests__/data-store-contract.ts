@@ -369,6 +369,115 @@ export function defineDataStoreContract(t: ContractTarget): void {
       });
     });
 
+    // ------------------------------------------------------------------ platform console (CROSS-TENANT by design)
+    describe("platform console", () => {
+      const soon = () => new Date(Date.now() + 60_000);
+      const seed = async (p: string) => {
+        const T = await newTenant(p, `Negocio ${p}`);
+        const c1 = await data.conversations.getOrCreate(T, "telegram", "c1", "Uno");
+        const c2 = await data.conversations.getOrCreate(T, "whatsapp", "c2", "Dos");
+        await data.conversations.getOrCreate(T, "simulator", "s1", "Sim"); // never counted
+        await data.conversations.setStatus(T, c1.id, "needs_human", "safety"); // urgent + legal hold
+        await data.conversations.setStatus(T, c2.id, "needs_human", "no_answer"); // waiting, not urgent
+        await data.channels.save(T, "telegram", { status: "connected", publicInfo: { externalId: `bot-${T}` } });
+        await data.channels.save(T, "messenger", { status: "error", publicInfo: {} });
+        await data.usage.record(T, { inputTokens: 300, outputTokens: 70 });
+        return { T, c1: c1.id, c2: c2.id };
+      };
+
+      it("stats for one tenant: tenants, conversations per day, waiting / urgent, channels, AI, holds, activity", async () => {
+        const { T } = await seed("pst");
+        const s = await data.platform.stats({ tenantId: T, now: soon(), days: 30 });
+        expect(s.tenants).toMatchObject({ total: 1, active: 1, suspended: 0, free: 1 });
+        expect(s.byDay).toHaveLength(30);
+        expect(s.byDay.every((d, i, xs) => /^\d{4}-\d{2}-\d{2}$/.test(d.day) && (i === 0 || xs[i - 1].day < d.day))).toBe(true);
+        expect(s.byDay.reduce((n, d) => n + d.count, 0)).toBe(2);
+        expect(s).toMatchObject({ waiting: 2, urgent: 1, urgentTenants: 1, aiInputTokens: 300, aiOutputTokens: 70, legalHolds: 1, legalHoldTenants: 1 });
+        expect(Number.isNaN(Date.parse(String(s.oldestUrgentAt)))).toBe(false);
+        expect(s.channels).toEqual(expect.arrayContaining([
+          { channel: "telegram", status: "connected", count: 1 }, { channel: "messenger", status: "error", count: 1 },
+        ]));
+        expect(s.channelErrors).toEqual([{ tenantId: T, channel: "messenger" }]);
+        expect(s.activity.map((a) => a.tenantId)).toEqual([T]);
+        expect((await data.platform.stats({ tenantId: T, days: 7 })).byDay).toHaveLength(7);
+      });
+
+      it("global stats cover every tenant (cross-tenant by design)", async () => {
+        const a = await seed("pga");
+        const b = await seed("pgb");
+        const g = await data.platform.stats({ now: soon() });
+        expect(g.tenants.total).toBeGreaterThanOrEqual(2);
+        expect(g.urgentTenants).toBeGreaterThanOrEqual(2);
+        expect(g.activity.map((x) => x.tenantId)).toEqual(expect.arrayContaining([a.T, b.T]));
+        expect(g.aiInputTokens).toBeGreaterThanOrEqual(600);
+      });
+
+      it("updateTenant: suspend / reactivate, plan and AI cap; validation; deleted or unknown tenants untouched", async () => {
+        const T = await newTenant("pup");
+        expect(await data.platform.updateTenant(T, { status: "suspended" })).toMatchObject({ id: T, status: "suspended" });
+        expect(await data.tenants.isActive(T)).toBe(false);
+        expect(await data.usage.remaining(T)).toBe(0); // suspended: no AI spend
+        expect(await data.platform.updateTenant(T, { status: "active", plan: "pro", aiMonthlyTokenCap: 3_000_000 }))
+          .toMatchObject({ status: "active", plan: "pro", aiMonthlyTokenCap: 3_000_000 });
+        expect(await data.usage.remaining(T)).toBe(3_000_000);
+        for (const bad of [{}, { status: "deleted" }, { plan: "gold" }, { aiMonthlyTokenCap: -1 }, { aiMonthlyTokenCap: 1.5 }, { aiMonthlyTokenCap: 2_000_000_000 }])
+          await expect(data.platform.updateTenant(T, bad as never)).rejects.toBeInstanceOf(DataValidationError);
+        const D = await newTenant("pdl");
+        await t.setTenantStatus(D, "deleted");
+        expect(await data.platform.updateTenant(D, { status: "active" })).toBeNull();
+        expect((await data.tenants.get(D))?.status).toBe("deleted");
+        expect(await data.platform.updateTenant(data.backend === "supabase" ? randomUUID() : `nope-${randomUUID()}`, { plan: "pro" })).toBeNull();
+      });
+
+      it("legal holds: listed per tenant (metadata only); lifting needs a reason, is audited and cannot cross tenants", async () => {
+        const a = await seed("plh");
+        const b = await seed("plx");
+        const holds = await data.platform.legalHolds({ tenantId: a.T });
+        expect(holds).toEqual([{ tenantId: a.T, conversationId: a.c1, channel: "telegram", reason: "safety", createdAt: expect.any(String) }]);
+        expect((await data.platform.legalHolds()).map((h) => h.conversationId)).toEqual(expect.arrayContaining([a.c1, b.c1]));
+        await expect(data.platform.liftLegalHold(a.T, a.c1, "admin-1", "because")).rejects.toBeInstanceOf(DataValidationError);
+        expect(await data.platform.liftLegalHold(b.T, a.c1, "admin-1", "resolved")).toBe(false); // A's case through B: no
+        expect(await data.platform.liftLegalHold(a.T, a.c2, "admin-1", "resolved")).toBe(false); // not on hold
+        expect(await data.platform.liftLegalHold(a.T, a.c1, "admin-1", "resolved")).toBe(true);
+        expect(await data.platform.legalHolds({ tenantId: a.T })).toEqual([]);
+        expect(await data.platform.legalHolds({ tenantId: b.T })).toHaveLength(1); // B untouched
+        expect((await data.conversations.get(a.T, a.c1))?.escalationReason ?? null).toBeNull();
+        const log = await data.platform.audit({ prefixes: ["platform."], tenantId: a.T });
+        expect(log).toEqual([expect.objectContaining({ tenantId: a.T, actor: "admin-1", action: "platform.legal_hold.lifted", detail: `${a.c1} resolved` })]);
+        expect(await data.platform.liftLegalHold(a.T, a.c1, "admin-1", "resolved")).toBe(false); // already lifted
+        // The purge may now delete it like any other conversation.
+        await data.conversations.setTimestamps(a.T, a.c1, { lastMessageAt: OLD });
+        await data.retention.purgeTenant(a.T, { cutoff: "2001-01-01T00:00:00.000Z", maskCutoff: OLD, maskedBody: "[masked]" });
+        expect(await data.conversations.get(a.T, a.c1)).toBeNull();
+      });
+
+      it("audit by action prefix, newest first, with a tenant filter; demo ids; AI reserved today", async () => {
+        const A = await newTenant("pau");
+        const B = await newTenant("pav");
+        await data.audit.log(A, "u1", "platform.tenant.plan", "pro");
+        await data.audit.log(B, "u1", "platform.tenant.suspended", "payment");
+        await data.audit.log(A, "u1", "privacy.customer_deleted", "1");
+        await data.audit.log(A, "u1", "other.action", "x");
+        const a = await data.platform.audit({ prefixes: ["platform.", "privacy."], tenantId: A, limit: 10 });
+        expect(a.map((r) => r.action)).toEqual(["privacy.customer_deleted", "platform.tenant.plan"]);
+        const all = await data.platform.audit({ prefixes: ["platform."], limit: 200 });
+        expect(all.some((r) => r.tenantId === B && r.action === "platform.tenant.suspended")).toBe(true);
+        expect(all.every((r) => r.action.startsWith("platform."))).toBe(true);
+        for (const bad of [[], ["platform"], ["a.", "b.", "c.", "d.", "e.", "f."], ["x%."]])
+          await expect(data.platform.audit({ prefixes: bad })).rejects.toBeInstanceOf(DataValidationError);
+
+        await data.audit.log(B, "demo", "demo.business", "cafe");
+        expect(await data.platform.demoTenantIds()).toContain(B);
+        expect(await data.platform.demoTenantIds()).not.toContain(A);
+
+        const day = new Date("2031-05-04T10:00:00Z");
+        expect(await data.platform.aiReservedToday(day)).toBe(0);
+        await data.rateLimits.hit("engine-ai-day:2031-05-04", 100, 172_800_000, day.getTime());
+        await data.rateLimits.hit("engine-ai-day:2031-05-04", 100, 172_800_000, day.getTime());
+        expect(await data.platform.aiReservedToday(day)).toBe(2_000);
+      });
+    });
+
     describe("conversations and messages", () => {
       it("providerMessageId is stored, mapped and used for inbound dedupe", async () => {
         const T = await newTenant("msg");

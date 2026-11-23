@@ -113,6 +113,61 @@ export interface PlatformAdminsRepo {
   isPlatformAdmin(userId: string): Promise<boolean>;
 }
 
+// ---------------- platform console (owner of the platform only) ----------------
+/** Counts only: never message text, customer names or contact data. */
+export interface PlatformStats {
+  tenants: { total: number; active: number; suspended: number; deleted: number; free: number; pro: number; business: number };
+  /** Non-simulator conversations CREATED per UTC day, oldest first, zero-filled, `days` entries ending today. */
+  byDay: { day: string; count: number }[];
+  /** Conversations waiting for a person (status needs_human); urgent = safety / legal escalations among them. */
+  waiting: number; urgent: number; urgentTenants: number; oldestUrgentAt: string | null;
+  /** channel_accounts grouped by (channel, status). */
+  channels: { channel: string; status: string; count: number }[];
+  /** Channels in status "error" (max 100), for the alerts. */
+  channelErrors: { tenantId: string; channel: string }[];
+  /** ai_usage of the month of `now`. */
+  aiInputTokens: number; aiOutputTokens: number;
+  legalHolds: number; legalHoldTenants: number;
+  /** Last real-customer message per tenant (only tenants that have one). */
+  activity: { tenantId: string; lastMessageAt: string }[];
+}
+export interface PlatformStatsQuery { now?: Date; days?: number; /** One tenant only (tenant detail page). */ tenantId?: string }
+export interface PlatformTenantPatch { status?: "active" | "suspended"; plan?: TenantPlan; aiMonthlyTokenCap?: number }
+export interface LegalHoldRow { tenantId: string; conversationId: string; channel: string; reason: string | null; createdAt: string }
+export interface PlatformAuditRow { tenantId: string | null; actor: string; action: string; detail: string; createdAt: string }
+export interface PlatformAuditQuery {
+  /** Action prefixes, e.g. ["platform.", "privacy."] (1..5, each ending in "."). */
+  prefixes: string[];
+  tenantId?: string;
+  /** 1..200, default 50. Newest first. */
+  limit?: number;
+}
+/**
+ * CROSS-TENANT by design: the platform console. The CALLER must first check
+ * `platformAdmins.isPlatformAdmin(userId)` (lib/platform/admin.ts requirePlatformAdmin); these methods do not know
+ * who is asking. Writes are limited to tenant status / plan / AI cap and lifting a legal hold.
+ */
+export interface PlatformRepo {
+  stats(q?: PlatformStatsQuery): Promise<PlatformStats>;
+  /** Tenant ids marked as demo businesses (audit action "demo.business"). */
+  demoTenantIds(): Promise<string[]>;
+  /** Returns the updated tenant, or null when it does not exist. Never sets "deleted". */
+  updateTenant(tenantId: string, patch: PlatformTenantPatch): Promise<TenantInfo | null>;
+  /** Conversations on legal hold (metadata only), oldest first, max 200. */
+  legalHolds(q?: { tenantId?: string }): Promise<LegalHoldRow[]>;
+  /**
+   * Lifts ONE conversation's sticky legal hold (clears legal_hold, a safety/legal escalation_reason and
+   * state.legalHold) and writes the audit row "platform.legal_hold.lifted" atomically. False when not on hold.
+   */
+  liftLegalHold(tenantId: string, conversationId: string, actor: string, reason: string): Promise<boolean>;
+  /** Audit rows whose action starts with one of the prefixes, across tenants (or one tenant). Newest first. */
+  audit(q: PlatformAuditQuery): Promise<PlatformAuditRow[]>;
+  /** Upper bound of the AI tokens reserved today by every tenant (engine/spend.ts shared day counter). */
+  aiReservedToday(now?: Date): Promise<number>;
+}
+export const LEGAL_HOLD_LIFT_REASONS = ["resolved", "no_risk", "authority_release", "error"] as const;
+export const PLATFORM_AUDIT_PREFIXES = /^[a-z_]+\.$/;
+
 // ---------------- settings / brand ----------------
 export type SettingsPatch = Partial<Omit<AgentSettings, "tenantId">>;
 export interface SettingsRepo {
@@ -416,6 +471,7 @@ export interface DataStore {
   readonly backend: DataBackend;
   tenants: TenantsRepo;
   platformAdmins: PlatformAdminsRepo;
+  platform: PlatformRepo;
   members: MembersRepo;
   users: UsersRepo;
   settings: SettingsRepo;

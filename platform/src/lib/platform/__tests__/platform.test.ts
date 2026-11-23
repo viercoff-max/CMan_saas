@@ -23,6 +23,8 @@ const h = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   notFound: () => { throw Object.assign(new Error("NEXT_HTTP_ERROR_FALLBACK;404"), { digest: "NEXT_HTTP_ERROR_FALLBACK;404" }); },
   redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;replace;${url}`, url }); },
+  usePathname: () => "/platform/tenants",
+  useRouter: () => ({ refresh: () => {}, push: () => {} }),
 }));
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: (n: string) => (n === "locale" ? { name: n, value: h.locale } : undefined), set: () => {}, delete: () => {} }),
@@ -67,13 +69,18 @@ vi.mock("@/lib/data", () => ({
       },
       get: async () => null,
     },
+    platform: {
+      stats: async () => { h.calls.push("platform.stats"); return (await import("@/lib/data/platform-rules")).emptyPlatformStats(); },
+      demoTenantIds: async () => { h.calls.push("platform.demoTenantIds"); return []; },
+    },
     audit: { log: async (tenantId: string, actor: string, action: string) => { h.audit.push({ tenantId, actor, action }); } },
   }),
 }));
 
-import { aiLevel, aiPercent, compactNumber, loadPlatformView, needsAttention, parsePlatformQuery, PLATFORM_VIEW_ACTION, recordPlatformView } from "@/lib/platform/admin";
+import { aiLevel, aiPercent, compactNumber, needsAttention, parsePlatformQuery, PLATFORM_VIEW_ACTION, recordPlatformView } from "@/lib/platform/admin";
+import { loadTenants as loadPlatformView } from "@/lib/platform/console";
 import { AUDIT_GLOBAL_TENANT } from "@/lib/data/types";
-import PlatformPage from "@/app/(platform)/platform/page";
+import PlatformPage from "@/app/(platform)/platform/tenants/page";
 import PlatformLayout from "@/app/(platform)/layout";
 import LandingPage, { generateMetadata as landingMeta } from "@/app/(marketing)/page";
 import PrivacyPage, { generateMetadata as privacyMeta } from "@/app/(marketing)/privacidad/page";
@@ -102,6 +109,7 @@ describe("/platform access", () => {
     expect(await rejection(loadPlatformView({}))).toBe("NEXT_HTTP_ERROR_FALLBACK;404");
     expect(await rejection(PlatformPage(sp()))).toBe("NEXT_HTTP_ERROR_FALLBACK;404");
     expect(h.calls).not.toContain("listAll");
+    expect(h.calls).not.toContain("platform.stats");
   });
 
   for (const role of ["owner", "admin", "agent"] as const) {
@@ -133,8 +141,11 @@ describe("/platform access", () => {
     const v = await loadPlatformView({ q: "  pana ", page: "2" }, new Date("2026-11-19T12:00:00Z"));
     expect(h.calls.indexOf("isPlatformAdmin:u-platform")).toBeGreaterThanOrEqual(0);
     expect(h.calls.indexOf("listAll")).toBeGreaterThan(h.calls.indexOf("isPlatformAdmin:u-platform"));
-    expect(h.listArgs[0]).toMatchObject({ limit: 25, offset: 25, search: "pana" });
-    expect(v.list.items).toHaveLength(2);
+    expect(h.calls.indexOf("platform.stats")).toBeGreaterThan(h.calls.indexOf("isPlatformAdmin:u-platform"));
+    expect(h.listArgs[0]).toMatchObject({ limit: 200, offset: 0 }); // every business, then search / filter / page here
+    expect(v.q).toBe("pana");
+    expect(v.items.map((x) => x.id)).toEqual(["t-a"]);
+    expect(v.page).toBe(1); // page 2 of 1 clamps
     expect(v.pages).toBe(1);
   });
 
@@ -146,19 +157,19 @@ describe("/platform access", () => {
   it("renders the tenant table (platform brand, badges, AI bar, counts only)", async () => {
     h.auth = session("u-platform", "owner");
     const page = html(await PlatformPage(sp()));
-    expect(page).toContain("Clientes");
+    expect(page).toContain("Negocios");
     expect(page).toContain("Panadería Uno");
     expect(page).toContain("Taller Dos");
-    expect(page).toContain("Pausado");
+    expect(page).toContain("Suspendido");
     expect(page).toContain("Tope de IA");
     expect(page).toContain('aria-valuenow="42"');
     expect(page).toContain("Sin conectar");
-    expect(page).toContain("noviembre de 2026");
+    expect(page).toContain('href="/platform/tenants/t-a"');
     const shell = html(await PlatformLayout({ children: null }));
     expect(shell).toContain(PLATFORM_BRAND.name);
     expect(shell).toContain("nombre provisional");
     h.locale = "en";
-    expect(html(await PlatformPage(sp()))).toContain("Customers");
+    expect(html(await PlatformPage(sp()))).toContain("Businesses");
   });
 });
 

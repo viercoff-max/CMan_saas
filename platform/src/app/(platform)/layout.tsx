@@ -1,16 +1,19 @@
 // Platform-owner area. Its own shell with the PLATFORM identity (lib/platform/brand.ts), never a tenant's brand.
-// The layout checks too (not only the page), so a non-admin never sees this header around the 404.
+// The layout checks too (not only the pages), so a non-admin never sees this header around the 404.
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import type { Metadata } from "next";
 import { logout } from "@/lib/auth";
 import { getLocale, makeT } from "@/lib/i18n";
+import { LocaleProvider } from "@/lib/i18n-client";
 import { requirePlatformAdmin } from "@/lib/platform/admin";
 import { PLATFORM_BRAND } from "@/lib/platform/brand";
+import { consoleDict } from "@/lib/platform/console-dict";
 import { platformDict } from "@/lib/platform/dict";
 import { platformAdminMetadata } from "@/lib/platform/seo";
 import { PlatformWordmark, platformThemeStyle } from "@/lib/platform/ui";
+import { PlatformTabs } from "./PlatformTabs";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = platformAdminMetadata;
@@ -22,6 +25,7 @@ export default async function PlatformLayout({ children }: { children: React.Rea
   const admin = await requirePlatformAdmin();
   const locale = await getLocale();
   const t = makeT(platformDict, locale);
+  const tc = makeT(consoleDict, locale);
   const c = PLATFORM_BRAND.colors;
 
   async function doLogout() { "use server"; await logout(); redirect("/login"); }
@@ -29,30 +33,35 @@ export default async function PlatformLayout({ children }: { children: React.Rea
     "use server";
     const jar = await cookies();
     jar.set("locale", jar.get("locale")?.value === "en" ? "es" : "en", { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax" });
-    revalidatePath("/platform");
+    revalidatePath("/platform", "layout");
   }
 
   return (
-    <div style={platformThemeStyle} className="min-h-screen">
-      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2 focus:text-ink">{t("nav.skip")}</a>
-      <header style={{ background: c.deep, color: c.deepText }}>
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 md:px-8">
-          <PlatformWordmark locale={locale} dark />
-          <nav aria-label={t("admin.navLabel")} className="flex items-center gap-2 text-sm">
-            <span aria-current="page" className="rounded-lg bg-white/10 px-3 py-2 font-semibold text-white">{t("admin.title")}</span>
-            <form action={toggleLang}>
-              <button type="submit" lang={locale === "es" ? "en" : "es"} aria-label={t("nav.langLabel")} className="min-h-11 rounded-lg px-3 py-2 text-white/85 hover:bg-white/10 hover:text-white">{t("nav.lang")}</button>
-            </form>
-            <form action={doLogout}>
-              <button type="submit" className="min-h-11 rounded-lg px-3 py-2 text-white/85 hover:bg-white/10 hover:text-white">{t("admin.logout")}</button>
-            </form>
-            <span title={admin.name || admin.email} aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-xs font-bold text-white">
-              {initials(admin.name, admin.email)}
-            </span>
-          </nav>
-        </div>
-      </header>
-      <main id="main" className="mx-auto max-w-7xl px-4 py-6 md:px-8 md:py-8">{children}</main>
-    </div>
+    <LocaleProvider locale={locale}>
+      <div style={platformThemeStyle} className="min-h-screen bg-canvas">
+        <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2 focus:text-ink">{t("nav.skip")}</a>
+        <header style={{ background: c.deep, color: c.deepText }}>
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 md:px-8">
+            <PlatformWordmark locale={locale} dark />
+            <div className="order-3 w-full min-w-0 lg:order-none lg:w-auto lg:flex-1">
+              <PlatformTabs label={t("admin.navLabel")} />
+            </div>
+            <div className="ml-auto flex items-center gap-1 text-sm">
+              <span className="hidden px-2 text-xs text-white/70 xl:inline"><span aria-hidden="true">🔒 </span>{tc("nav.badge")}</span>
+              <form action={toggleLang}>
+                <button type="submit" lang={locale === "es" ? "en" : "es"} aria-label={t("nav.langLabel")} className="min-h-11 rounded-lg px-3 py-2 text-white/85 hover:bg-white/10 hover:text-white">{t("nav.lang")}</button>
+              </form>
+              <form action={doLogout}>
+                <button type="submit" className="min-h-11 rounded-lg px-3 py-2 text-white/85 hover:bg-white/10 hover:text-white">{t("admin.logout")}</button>
+              </form>
+              <span title={admin.name || admin.email} aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-xs font-bold text-white">
+                {initials(admin.name, admin.email)}
+              </span>
+            </div>
+          </div>
+        </header>
+        <main id="main" className="mx-auto max-w-7xl px-4 py-6 md:px-8 md:py-8">{children}</main>
+      </div>
+    </LocaleProvider>
   );
 }

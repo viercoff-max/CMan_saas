@@ -1,17 +1,16 @@
 // Platform-owner area (/platform). SERVER ONLY.
 // Order is the security contract: (1) signed-in user -> (2) platformAdmins.isPlatformAdmin(userId) -> only then
-// (3) the CROSS-TENANT tenants.listAll. Anyone else (anonymous, tenant owners/admins/agents) gets notFound(), so the
-// screen does not reveal that it exists. Read-only: no impersonation, no plan edits.
+// (3) any CROSS-TENANT read or write (lib/platform/console.ts). Anyone else (anonymous, tenant owners/admins/agents)
+// gets notFound(), so the screen does not reveal that it exists. No impersonation.
 import { cache } from "react";
 import { notFound } from "next/navigation";
 import { getAuthState } from "../auth";
 import { getData } from "../data";
-import { AUDIT_GLOBAL_TENANT, type TenantListPage, type TenantOverview } from "../data/types";
+import { AUDIT_GLOBAL_TENANT, type TenantOverview } from "../data/types";
 import { auditEvent } from "../audit-events";
 import { hashKey, hit } from "../security/rate-limit";
 
 export const PLATFORM_VIEW_ACTION = "platform.view";
-export const PLATFORM_PAGE_SIZE = 25;
 const HOUR_MS = 60 * 60 * 1000;
 
 export interface PlatformAdmin { userId: string; name: string; email: string }
@@ -62,24 +61,6 @@ export function parsePlatformQuery(sp: Record<string, string | string[] | undefi
   const n = Number.parseInt(one(sp.page), 10);
   const page = Number.isFinite(n) && n >= 1 ? Math.min(n, 10_000) : 1;
   return { q, page };
-}
-
-export interface PlatformView {
-  admin: PlatformAdmin;
-  query: PlatformQuery;
-  list: TenantListPage;
-  pages: number;
-}
-
-/** The whole /platform data load. Throws notFound() for non-admins BEFORE touching tenants.listAll. */
-export async function loadPlatformView(sp: Record<string, string | string[] | undefined>, now = new Date()): Promise<PlatformView> {
-  const admin = await requirePlatformAdmin();
-  const query = parsePlatformQuery(sp);
-  await recordPlatformView(admin.userId, now.getTime());
-  const list = await getData().tenants.listAll({
-    limit: PLATFORM_PAGE_SIZE, offset: (query.page - 1) * PLATFORM_PAGE_SIZE, search: query.q || undefined, now,
-  });
-  return { admin, query, list, pages: Math.max(1, Math.ceil(list.total / PLATFORM_PAGE_SIZE)) };
 }
 
 // ---------- pure helpers for the table ----------

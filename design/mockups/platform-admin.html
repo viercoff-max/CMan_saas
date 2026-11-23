@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conversa · consola de plataforma (prototipo)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Prototype-only additions for the platform console (proposal, 2026-11-23). */
+    .wrap { max-width: 1400px; margin: 0 auto; }
+    .g2 { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; margin-bottom: 14px; }
+    .g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 14px; }
+    .bars { display: flex; align-items: flex-end; gap: 3px; height: 130px; border-bottom: 1px solid var(--line); margin-top: 14px; }
+    .bars i { flex: 1; background: var(--b-primary); border-radius: 4px 4px 0 0; }
+    .ticks { display: flex; gap: 3px; font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .ticks span { flex: 1; text-align: center; }
+    .alerts li { display: flex; gap: 10px; align-items: flex-start; padding: 11px 0; border-top: 1px solid var(--line); list-style: none; }
+    .alerts li:first-child { border-top: 0; }
+    .alerts { margin: 6px 0 0; padding: 0; }
+    .sev { width: 9px; height: 9px; border-radius: 50%; margin-top: 7px; flex: none; }
+    .sev.bad { background: var(--bad); } .sev.warn { background: var(--warn); } .sev.info { background: #4F46E5; }
+    .spark2 { display: inline-flex; align-items: flex-end; gap: 2px; height: 20px; }
+    .spark2 i { width: 4px; background: #9DB9B4; border-radius: 2px; }
+    .kv { display: grid; grid-template-columns: 150px 1fr; gap: 9px 14px; font-size: 14px; }
+    .kv dt { color: var(--muted); } .kv dd { margin: 0; }
+    .act { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn-danger { background: var(--surface); border: 1px solid #F1B5B5; color: var(--bad); }
+    .tlog li { list-style: none; padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; display: flex; gap: 12px; }
+    .tlog li:first-child { border-top: 0; } .tlog { margin: 0; padding: 0; }
+    .tlog time { color: var(--muted); font-size: 12.5px; min-width: 118px; }
+    .crumb { font-size: 13.5px; color: var(--muted); margin-bottom: 10px; } .crumb a { color: var(--muted); }
+    .tenant-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+    .tenant-head .big { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; font-size: 20px; }
+    .overlay { position: fixed; inset: 0; background: rgba(16, 32, 30, .45); display: flex; align-items: center; justify-content: center; z-index: 20; }
+    .modal { width: 520px; background: var(--surface); border-radius: 18px; box-shadow: var(--shadow-lg); padding: 26px; }
+    .modal h3 { font-size: 20px; } .modal .input { margin-top: 6px; }
+    .note { background: #F1F6F5; border-radius: 12px; padding: 12px 14px; font-size: 13.5px; color: var(--ink-2); }
+    .lock { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+    .filters.inline { padding-top: 0; }
+    .mini-meter { width: 120px; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+  (() => {
+    const LOGO = `<svg viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="11" fill="#14181F"/><path d="M10 13.5a4 4 0 0 1 4-4h9a4 4 0 0 1 4 4v5a4 4 0 0 1-4 4h-6l-4.5 3.6v-3.7A4 4 0 0 1 10 18.5z" fill="#0F766E"/><path d="M18 23.5h7.5l4.5 3.6v-3.7a3.6 3.6 0 0 0 0-.4V18" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>`;
+    const T = [
+      { n: "Cocina Feliz", i: "CF", c: "#C2410C", plan: "Pro", st: "Activo", ch: ["Telegram", "WhatsApp"], conv: 412, ai: 42, team: 3, since: "oct 2026", last: "hace 3 min" },
+      { n: "Café Aurora", i: "CA", c: "#92400E", plan: "Gratis", st: "Activo", ch: ["Telegram"], conv: 87, ai: 61, team: 2, since: "nov 2026", last: "hace 1 h" },
+      { n: "Moda Norte (demo)", i: "MN", c: "#7C3AED", plan: "Gratis", st: "Demo", ch: [], conv: 4, ai: 2, team: 1, since: "hoy", last: "hace 20 min" },
+      { n: "Clínica Dental Sonrisa", i: "CS", c: "#0E7490", plan: "Negocio", st: "Activo", ch: ["WhatsApp", "ManyChat"], conv: 1290, ai: 88, team: 7, since: "sep 2026", last: "hace 1 min" },
+      { n: "Librería Andante", i: "LA", c: "#9A3412", plan: "Gratis", st: "Tope de IA", ch: ["Telegram"], conv: 150, ai: 100, team: 1, since: "oct 2026", last: "hace 2 h" },
+      { n: "Estudio Yoga Brisa", i: "YB", c: "#6D28D9", plan: "Pro", st: "Suspendido", ch: ["Telegram · error"], conv: 23, ai: 9, team: 2, since: "ago 2026", last: "hace 12 días" },
+      { n: "Ferretería El Tornillo", i: "FT", c: "#3F6212", plan: "Gratis", st: "Sin actividad", ch: [], conv: 0, ai: 0, team: 1, since: "oct 2026", last: "hace 34 días" },
+    ];
+    const stB = { "Activo": "good", "Demo": "info", "Tope de IA": "warn", "Suspendido": "bad", "Sin actividad": "" };
+    const chB = (c) => c.includes("error") ? "bad" : c === "WhatsApp" ? "good" : c === "ManyChat" ? "info" : "tg";
+    const tile = (t, s = 34) => `<span style="width:${s}px;height:${s}px;border-radius:10px;background:${t.c};color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:${s > 40 ? 20 : 12.5}px;flex:none">${t.i}</span>`;
+    const spark = (seed) => `<span class="spark2" aria-hidden="true">${Array.from({ length: 12 }, (_, i) => `<i style="height:${4 + ((seed * (i + 5)) % 16)}px"></i>`).join("")}</span>`;
+    const top = (tab) => `<header class="admin-top">
+      <div class="p-logo"><span class="logo-tile">${LOGO}</span><b>Conversa</b><span class="prov">nombre provisional</span></div>
+      <nav class="admin-tabs" aria-label="Administración">${["Resumen", "Negocios", "Cumplimiento", "Bitácora", "Configuración"].map((x) => `<a href="#" ${x === tab ? 'aria-current="page"' : ""}>${x}</a>`).join("")}</nav>
+      <span class="grow"></span><span class="lock" style="color:#A9C2BE">🔒 Administrador de la plataforma</span>
+      <span class="avatar" style="background:#1C302D;color:#E6F2F0">CV</span></header>`;
+    const head = (h, p, a = "") => `<div class="page-head"><div><h1>${h}</h1><p>${p}</p></div>${a}</div>`;
+    const privacy = `<p class="xs muted" style="margin-top:12px">Por privacidad, la consola nunca muestra mensajes ni datos de los clientes finales de cada negocio: solo conteos y configuración.</p>`;
+
+    function resumen() {
+      const days = [18, 22, 25, 21, 30, 34, 29, 38, 41, 37, 44, 52, 48, 55];
+      const max = Math.max(...days);
+      return `${top("Resumen")}<main class="content wide wrap">
+        ${head("Resumen de la plataforma", "Cómo va el negocio y qué necesita tu atención hoy.", `<div class="filters inline"><button aria-pressed="false">Hoy</button><button aria-pressed="true">7 días</button><button aria-pressed="false">30 días</button></div>`)}
+        <div class="kpis">
+          <div class="card kpi"><span class="eyebrow">Negocios activos</span><div class="num">5</div><div class="lbl">+2 nuevos esta semana · 1 demo</div></div>
+          <div class="card kpi"><span class="eyebrow">Conversaciones · 7 días</span><div class="num">1,966</div><div class="lbl">68% resueltas por el asistente</div></div>
+          <div class="card kpi"><span class="eyebrow">IA hoy vs tope diario</span><div class="num">41<span style="font-size:20px">%</span></div><div class="meter neutral" style="margin:4px 0 8px"><i style="width:41%"></i></div><div class="lbl">2.0 M de 5 M tokens · aprox. $0.45 USD</div></div>
+          <div class="card kpi alert"><span class="eyebrow" style="color:var(--s-need)">Casos urgentes sin atender</span><div class="num">3</div><div class="lbl">en 2 negocios · el más antiguo hace 25 min</div></div>
+        </div>
+        <div class="g2">
+          <div class="card card-pad"><div class="row between"><h2 class="card-title">Conversaciones por día (todos los negocios)</h2><span class="xs muted">14 días</span></div>
+            <div class="bars">${days.map((d) => `<i style="height:${(d / max) * 100}%" title="${d * 10}"></i>`).join("")}</div>
+            <div class="ticks">${days.map((_, i) => `<span>${i % 2 === 0 ? 10 + i : ""}</span>`).join("")}</div>
+            <p class="xs muted" style="margin-top:8px">Ver datos · el costo de IA del mes va en $6.80 USD (proyección: $14 USD)</p></div>
+          <div class="card card-pad"><h2 class="card-title">Alertas</h2>
+            <ul class="alerts">
+              <li><span class="sev bad"></span><div class="grow"><b>Estudio Yoga Brisa</b><div class="small muted">Telegram desconectado: el token dejó de funcionar hace 2 días.</div></div><button class="btn btn-ghost btn-sm">Ver</button></li>
+              <li><span class="sev warn"></span><div class="grow"><b>Librería Andante</b><div class="small muted">Llegó a su tope de IA (300 mil tokens). Los mensajes pasan a su equipo.</div></div><button class="btn btn-ghost btn-sm">Ver</button></li>
+              <li><span class="sev warn"></span><div class="grow"><b>Clínica Dental Sonrisa</b><div class="small muted">88% de su tope de IA con 8 días por delante.</div></div><button class="btn btn-ghost btn-sm">Ver</button></li>
+              <li><span class="sev info"></span><div class="grow"><b>Ferretería El Tornillo</b><div class="small muted">Sin actividad en 34 días y sin canal conectado.</div></div><button class="btn btn-ghost btn-sm">Ver</button></li>
+            </ul></div>
+        </div>
+        <div class="g3">
+          <div class="card card-pad"><span class="eyebrow">Negocios por plan</span><div class="small" style="margin-top:10px">Gratis 4 · Pro 2 · Negocio 1</div><div class="meter" style="margin-top:8px;display:flex"><i style="width:57%;background:#9DB9B4;border-radius:0"></i><i style="width:29%;background:#0F766E;border-radius:0"></i><i style="width:14%;background:#10201E;border-radius:0"></i></div></div>
+          <div class="card card-pad"><span class="eyebrow">Canales conectados</span><div class="small" style="margin-top:10px">Telegram 3 · WhatsApp 2 · ManyChat 1</div><div class="xs muted" style="margin-top:6px">1 con error</div></div>
+          <div class="card card-pad"><span class="eyebrow">Soporte asistido</span><div class="small" style="margin-top:10px">2 solicitudes nuevas · 1 en proceso</div><div class="xs muted" style="margin-top:6px">Configurar WhatsApp · Cargar contexto</div></div>
+        </div>${privacy}</main>`;
+    }
+
+    function negocios() {
+      return `${top("Negocios")}<main class="content wide wrap">
+        ${head("Negocios", "Todos los negocios en la plataforma. Usa los filtros para encontrar a quién atender.", `<button class="btn btn-secondary btn-sm">Exportar CSV</button>`)}
+        <div class="card table-wrap">
+          <div class="row" style="padding:14px 16px;border-bottom:1px solid var(--line)"><input class="input" placeholder="Buscar por nombre, dirección corta o correo del dueño..." style="width:380px;min-height:40px"><span class="grow"></span>
+            <div class="filters inline"><button aria-pressed="true">Todos <span class="n">7</span></button><button aria-pressed="false">Activos <span class="n">3</span></button><button aria-pressed="false">Suspendidos <span class="n">1</span></button><button aria-pressed="false">Demos <span class="n">1</span></button><button aria-pressed="false">Sin actividad 30 días <span class="n">1</span></button><button aria-pressed="false">Cerca del tope de IA <span class="n">2</span></button></div></div>
+          <table class="table"><thead><tr><th>Negocio</th><th>Plan</th><th>Estado</th><th>Canales</th><th style="text-align:right">Conversaciones del mes</th><th>Uso de IA</th><th>Equipo</th><th>Última actividad</th><th></th></tr></thead><tbody>
+          ${T.map((t, i) => `<tr><td><div class="tn">${tile(t)}<div><b style="font-weight:600">${t.n}</b><div class="xs muted">Desde ${t.since}</div></div></div></td>
+            <td>${t.plan}</td><td><span class="badge ${stB[t.st]}"><span class="dot"></span>${t.st}</span></td>
+            <td>${t.ch.length ? t.ch.map((c) => `<span class="badge ${chB(c)}" style="margin-right:4px">${c}</span>`).join("") : '<span class="xs muted">Sin conectar</span>'}</td>
+            <td style="text-align:right"><span class="row" style="justify-content:flex-end">${spark(i + 2)}<b class="mono" style="min-width:46px;text-align:right">${t.conv.toLocaleString("es-MX")}</b></span></td>
+            <td><div class="row" style="gap:8px"><div class="meter neutral mini-meter" style="height:6px"><i style="width:${t.ai}%;${t.ai >= 85 ? "background:var(--warn)" : ""}"></i></div><span class="xs mono">${t.ai}%</span></div></td>
+            <td class="small">${t.team}</td><td class="small muted">${t.last}</td><td><button class="btn btn-ghost btn-sm">Abrir</button></td></tr>`).join("")}
+          </tbody></table></div>${privacy}</main>`;
+    }
+
+    function ficha(modal = "") {
+      const t = T[3];
+      const days = [120, 140, 132, 151, 160, 149, 171, 180, 166, 190, 205, 198, 214, 220];
+      const max = Math.max(...days);
+      return `${top("Negocios")}<main class="content wide wrap">
+        <div class="crumb"><a href="#">Negocios</a> › ${t.n}</div>
+        <div class="tenant-head">${tile(t, 56)}<div class="grow"><h1 style="font-family:var(--display);font-size:28px">${t.n}</h1><div class="row small muted" style="gap:8px;margin-top:4px"><span class="badge good"><span class="dot"></span>Activo</span>Plan Negocio · desde sep 2026 · dirección: <span class="mono">clinica-sonrisa</span></div></div>
+          <div class="act"><button class="btn btn-secondary btn-sm">Cambiar plan</button><button class="btn btn-secondary btn-sm">Ajustar tope de IA</button><button class="btn btn-danger btn-sm">Suspender</button></div></div>
+        <div class="kpis">
+          <div class="card kpi"><span class="eyebrow">Conversaciones del mes</span><div class="num">1,290</div><div class="lbl">74% resueltas por el asistente</div></div>
+          <div class="card kpi"><span class="eyebrow">Uso de IA del mes</span><div class="num">88<span style="font-size:20px">%</span></div><div class="meter" style="margin:4px 0 8px"><i style="width:88%;background:var(--warn)"></i></div><div class="lbl">2.64 M de 3 M tokens · aprox. $0.71 USD</div></div>
+          <div class="card kpi"><span class="eyebrow">Esperando a una persona</span><div class="num">2</div><div class="lbl">1 urgente · sin contenido visible</div></div>
+          <div class="card kpi"><span class="eyebrow">Primera respuesta humana</span><div class="num">14<span style="font-size:20px"> min</span></div><div class="lbl">mediana, 7 días</div></div>
+        </div>
+        <div class="g2">
+          <div class="card card-pad"><h2 class="card-title">Conversaciones por día</h2>
+            <div class="bars">${days.map((d) => `<i style="height:${(d / max) * 100}%"></i>`).join("")}</div>
+            <div class="ticks">${days.map((_, i) => `<span>${i % 2 === 0 ? 10 + i : ""}</span>`).join("")}</div></div>
+          <div class="card card-pad"><h2 class="card-title" style="margin-bottom:12px">Datos del negocio</h2>
+            <dl class="kv">
+              <dt>Dueño</dt><dd>Dra. Ejemplo · <span class="mono small">dueno@example.com</span></dd>
+              <dt>Equipo</dt><dd>7 personas (1 dueño, 2 admin, 4 agentes)</dd>
+              <dt>Canales</dt><dd><span class="badge good">WhatsApp · verificado</span> <span class="badge info">ManyChat</span></dd>
+              <dt>Shopify</dt><dd class="muted">No conectado</dd>
+              <dt>Contexto</dt><dd>Archivo completo + 6 de 8 secciones</dd>
+              <dt>Tope de IA</dt><dd>3,000,000 tokens/mes (personalizado)</dd>
+              <dt>Retención legal</dt><dd>1 caso de seguridad retenido</dd>
+            </dl></div>
+        </div>
+        <div class="card card-pad"><div class="row between"><h2 class="card-title">Bitácora de este negocio (acciones de la plataforma)</h2><span class="xs muted">Solo tú y otros administradores de la plataforma</span></div>
+          <ul class="tlog" style="margin-top:8px">
+            <li><time>20 nov · 18:02</time><span><b>Carlos</b> subió el tope de IA de 2 M a 3 M tokens. Motivo: «temporada alta».</span></li>
+            <li><time>12 nov · 10:15</time><span><b>Carlos</b> cambió el plan de Pro a Negocio.</span></li>
+            <li><time>02 sep · 09:40</time><span>Negocio creado por su dueño.</span></li>
+          </ul></div>
+        ${privacy}</main>${modal}`;
+    }
+
+    function suspender() {
+      return ficha(`<div class="overlay"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="mt">
+        <h3 id="mt">¿Suspender Clínica Dental Sonrisa?</h3>
+        <p class="small muted" style="margin-top:8px">Mientras esté suspendido: su equipo no puede entrar, el asistente no responde en ningún canal y no se gasta IA. No se borra nada; puedes reactivarlo cuando quieras.</p>
+        <label class="small" style="display:block;margin-top:16px;font-weight:600">Motivo (obligatorio, queda en la bitácora)
+          <select class="input"><option>Falta de pago</option><option>Uso indebido</option><option>Lo pidió el cliente</option><option>Otro</option></select></label>
+        <label class="small" style="display:block;margin-top:12px;font-weight:600">Para confirmar, escribe la dirección corta del negocio
+          <input class="input mono" placeholder="clinica-sonrisa"></label>
+        <div class="note" style="margin-top:14px">Se avisará por correo al dueño (cuando el correo propio esté configurado).</div>
+        <div class="row" style="justify-content:flex-end;margin-top:18px"><button class="btn btn-ghost">Cancelar</button><button class="btn" style="background:var(--bad);color:#fff">Suspender negocio</button></div>
+      </div></div>`);
+    }
+
+    function cumplimiento() {
+      return `${top("Cumplimiento")}<main class="content wide wrap">
+        ${head("Cumplimiento y privacidad", "Solicitudes de borrado o acceso a datos y casos con retención legal. Todo queda registrado.")}
+        <div class="kpis">
+          <div class="card kpi"><span class="eyebrow">Solicitudes abiertas</span><div class="num">2</div><div class="lbl">plazo legal: 20 días hábiles</div></div>
+          <div class="card kpi"><span class="eyebrow">Atendidas este mes</span><div class="num">5</div><div class="lbl">3 de Meta · 2 por correo</div></div>
+          <div class="card kpi"><span class="eyebrow">Casos con retención legal</span><div class="num">4</div><div class="lbl">en 3 negocios · el más antiguo: 41 días</div></div>
+          <div class="card kpi"><span class="eyebrow">Purga automática</span><div class="num" style="font-size:26px">Hoy 03:00</div><div class="lbl">90 días de conservación</div></div>
+        </div>
+        <div class="g2">
+          <div class="card table-wrap"><div class="row" style="padding:14px 16px;border-bottom:1px solid var(--line)"><h2 class="card-title">Solicitudes de datos (ARCO)</h2><span class="grow"></span><button class="btn btn-secondary btn-sm">Registrar solicitud</button></div>
+            <table class="table"><thead><tr><th>Recibida</th><th>Origen</th><th>Negocio</th><th>Tipo</th><th>Estado</th><th></th></tr></thead><tbody>
+              <tr><td class="small">22 nov</td><td><span class="badge info">Meta</span></td><td>Café Aurora</td><td>Borrado</td><td><span class="badge good"><span class="dot"></span>Hecho</span></td><td class="xs muted">código ·d81f</td></tr>
+              <tr><td class="small">21 nov</td><td><span class="badge">Correo</span></td><td>Cocina Feliz</td><td>Acceso (exportar)</td><td><span class="badge warn"><span class="dot"></span>Abierta</span></td><td><button class="btn btn-ghost btn-sm">Atender</button></td></tr>
+              <tr><td class="small">19 nov</td><td><span class="badge">Correo</span></td><td>Clínica Dental Sonrisa</td><td>Borrado</td><td><span class="badge warn"><span class="dot"></span>Abierta · 1 caso retenido</span></td><td><button class="btn btn-ghost btn-sm">Atender</button></td></tr>
+            </tbody></table></div>
+          <div class="card card-pad"><h2 class="card-title">Retención legal</h2><p class="small muted" style="margin-top:4px">Casos de seguridad o legales que no se borran con la purga. Levantar una retención exige un motivo y queda en la bitácora.</p>
+            <ul class="alerts" style="margin-top:10px">
+              <li><span class="sev bad"></span><div class="grow"><b>Clínica Dental Sonrisa</b><div class="small muted">1 caso · seguridad · desde 12 oct</div></div><button class="btn btn-ghost btn-sm">Levantar…</button></li>
+              <li><span class="sev bad"></span><div class="grow"><b>Cocina Feliz</b><div class="small muted">2 casos · seguridad · desde 30 oct</div></div><button class="btn btn-ghost btn-sm">Levantar…</button></li>
+              <li><span class="sev warn"></span><div class="grow"><b>Café Aurora</b><div class="small muted">1 caso · legal (PROFECO) · desde 15 nov</div></div><button class="btn btn-ghost btn-sm">Levantar…</button></li>
+            </ul></div>
+        </div>${privacy}</main>`;
+    }
+
+    const R = { resumen, negocios, ficha: () => ficha(), suspender, cumplimiento };
+    const go = () => { document.getElementById("app").innerHTML = `<div class="platform">${(R[location.hash.slice(1)] || resumen)()}</div>`; };
+    addEventListener("hashchange", go); go();
+  })();
+  </script>
+</body>
+</html>

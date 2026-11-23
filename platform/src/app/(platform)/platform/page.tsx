@@ -1,164 +1,113 @@
-// /platform: tenant overview for platform admins (read-only). Everyone else: 404 (see lib/platform/admin.ts).
-// Shows counts only: never message text or end-customer data.
+// /platform: overview of the whole platform for platform admins. Everyone else: 404 (lib/platform/admin.ts).
+// Counts only: never message text or end-customer data.
 import Link from "next/link";
+import { Card } from "@/components/ui";
 import { getLocale, makeT } from "@/lib/i18n";
-import type { Locale } from "@/lib/i18n-shared";
-import type { TenantOverview } from "@/lib/data/types";
-import { Badge, Card, inputCls } from "@/components/ui";
-import { aiLevel, aiPercent, compactNumber, loadPlatformView, needsAttention } from "@/lib/platform/admin";
-import { PLATFORM_BRAND } from "@/lib/platform/brand";
-import { platformDict } from "@/lib/platform/dict";
+import { compactNumber } from "@/lib/platform/admin";
+import { loadOverview } from "@/lib/platform/console";
+import { consoleDict } from "@/lib/platform/console-dict";
+import { ago, intlLocale, usd } from "@/lib/platform/format";
+import { DayBars, Kpi, Privacy, UsageBar } from "./parts";
 
 export const dynamic = "force-dynamic";
 
-type T = ReturnType<typeof makeT>;
-const intlLocale = (l: Locale) => (l === "en" ? "en-US" : "es-MX");
+const SEV = { bad: "bg-red-600", warn: "bg-amber-500", info: "bg-indigo-500" } as const;
 
-function monthLabel(period: string, locale: Locale) {
-  const d = new Date(`${period}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) return period;
-  return new Intl.DateTimeFormat(intlLocale(locale), { month: "long", year: "numeric", timeZone: "UTC" }).format(d);
-}
-function sinceLabel(createdAt: string, locale: Locale) {
-  const d = new Date(createdAt);
-  if (Number.isNaN(d.getTime())) return "";
-  return new Intl.DateTimeFormat(intlLocale(locale), { month: "short", year: "numeric", timeZone: "UTC" }).format(d);
-}
-
-const STATUS_TONE = { active: "good", suspended: "warn", deleted: "bad" } as const;
-const BAR = { ok: "bg-brand", high: "bg-amber-500", full: "bg-red-600" } as const;
-
-function pageHref(q: string, page: number) {
-  const p = new URLSearchParams();
-  if (q) p.set("q", q);
-  if (page > 1) p.set("page", String(page));
-  const s = p.toString();
-  return s ? `/platform?${s}` : "/platform";
-}
-
-function AiCell({ tenant, t, locale }: { tenant: TenantOverview; t: T; locale: Locale }) {
-  const pct = aiPercent(tenant);
-  const level = aiLevel(pct);
-  const nf = new Intl.NumberFormat(intlLocale(locale));
-  return (
-    <div className="min-w-40">
-      <div className="flex items-center gap-2">
-        <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={t("admin.aiBar", { pct })}
-          className="h-2 flex-1 overflow-hidden rounded-full bg-canvas ring-1 ring-line">
-          <div className={`h-full ${BAR[level]}`} style={{ width: `${pct}%` }} />
-        </div>
-        <span className="w-10 text-right text-xs tabular-nums text-ink">{pct}%</span>
-      </div>
-      <p className="mt-1 text-xs text-muted" title={`${nf.format(tenant.aiTokensThisMonth)} / ${nf.format(tenant.aiMonthlyTokenCap)}`}>
-        {t("admin.aiOf", { used: compactNumber(tenant.aiTokensThisMonth), cap: compactNumber(tenant.aiMonthlyTokenCap) })}
-      </p>
-    </div>
-  );
-}
-
-function Kpi({ label, value, hint, warn }: { label: string; value: string; hint: string; warn?: boolean }) {
-  return (
-    <Card className={warn ? "border-amber-300" : undefined}>
-      <p className={`text-xs font-semibold uppercase tracking-wide ${warn ? "text-warn" : "text-muted"}`}>{label}</p>
-      <p className="mt-2 text-3xl font-bold tabular-nums text-ink">{value}</p>
-      <p className="mt-1 text-sm text-muted">{hint}</p>
-    </Card>
-  );
-}
-
-export default async function PlatformPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const view = await loadPlatformView(await searchParams);
+export default async function PlatformOverviewPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const now = new Date();
+  const v = await loadOverview(await searchParams, now);
   const locale = await getLocale();
-  const t = makeT(platformDict, locale);
+  const t = makeT(consoleDict, locale);
   const nf = new Intl.NumberFormat(intlLocale(locale));
-  const { list, query, pages } = view;
-  const month = monthLabel(list.period, locale);
-  const convOnPage = list.items.reduce((s, x) => s + x.conversationsThisMonth, 0);
-  const attention = list.items.filter(needsAttention).length;
+  const s = v.stats;
+  const aiPct = v.aiDailyCap > 0 ? Math.min(100, Math.floor((v.aiTodayTokens / v.aiDailyCap) * 100)) : 100;
+  const connected = s.channels.filter((c) => c.status === "connected");
+  const errors = s.channels.filter((c) => c.status === "error").reduce((n, c) => n + c.count, 0);
+  const plans = [["free", s.tenants.free], ["pro", s.tenants.pro], ["business", s.tenants.business]] as const;
+  const planTotal = Math.max(1, plans.reduce((n, [, c]) => n + c, 0));
+  const PLAN_BG = { free: "bg-[#9DB9B4]", pro: "bg-brand", business: "bg-[#10201E]" } as const;
 
   return (
     <>
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold tracking-tight text-ink">{t("admin.title")}</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted">{t("admin.subtitle", { brand: PLATFORM_BRAND.name })}</p>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-ink">{t("ov.title")}</h1>
+          <p className="mt-1 text-sm text-muted">{t("ov.subtitle")}</p>
+        </div>
+        <nav aria-label={t("ov.periodLabel")} className="flex gap-2">
+          {([7, 30] as const).map((d) => (
+            <Link key={d} href={d === 7 ? "/platform" : "/platform?days=30"} aria-current={v.days === d ? "page" : undefined}
+              className={`inline-flex min-h-11 items-center rounded-full border px-4 text-sm font-medium ${v.days === d ? "border-ink bg-ink text-white" : "border-line bg-surface text-ink hover:bg-canvas"}`}>
+              {t(d === 7 ? "ov.days7" : "ov.days30")}
+            </Link>
+          ))}
+        </nav>
       </div>
 
-      <section aria-label={t("admin.title")} className="mb-6 grid gap-4 sm:grid-cols-3">
-        <Kpi label={t("admin.kpiTotal")} value={nf.format(list.total)} hint={query.q ? t("admin.results", { total: nf.format(list.total) }) : t("admin.kpiTotalHint")} />
-        <Kpi label={t("admin.kpiConv", { month })} value={nf.format(convOnPage)} hint={t("admin.kpiOnPage")} />
-        <Kpi label={t("admin.kpiAttention")} value={nf.format(attention)} hint={t("admin.kpiAttentionHint")} warn={attention > 0} />
+      <section className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Kpi label={t("ov.kpiActive")} value={nf.format(v.activeTenants)} hint={t("ov.kpiActiveHint", { n: v.newTenants, demo: v.demoTenants })} />
+        <Kpi label={t("ov.kpiConv", { days: v.days })} value={nf.format(v.conversations)} hint={t("ov.kpiConvHint")} />
+        <Kpi label={t("ov.kpiAi")} value={`${aiPct}%`} tone={aiPct >= 80 ? "warn" : undefined}
+          hint={t("ov.kpiAiHint", { used: compactNumber(v.aiTodayTokens), cap: compactNumber(v.aiDailyCap) })}>
+          <UsageBar pct={aiPct} label={t("ov.kpiAi")} />
+        </Kpi>
+        <Kpi label={t("ov.kpiUrgent")} value={nf.format(s.urgent)} tone={s.urgent > 0 ? "bad" : undefined}
+          hint={s.urgent > 0 ? t("ov.kpiUrgentHint", { n: s.urgentTenants, ago: ago(s.oldestUrgentAt, now, t) }) : `${t("ov.kpiUrgentNone")} · ${t("ov.kpiWaitingHint", { n: s.waiting })}`} />
       </section>
 
-      <Card className="p-0">
-        <form method="get" action="/platform" role="search" className="flex flex-wrap items-end gap-2 border-b border-line p-4">
-          <label className="min-w-0 flex-1 basis-64">
-            <span className="mb-1 block text-sm font-medium text-ink">{t("admin.search")}</span>
-            <input type="search" name="q" defaultValue={query.q} maxLength={100} placeholder={t("admin.searchPlaceholder")} className={inputCls} />
-          </label>
-          <button type="submit" className="min-h-11 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-on-brand hover:bg-brand-dark">{t("admin.searchBtn")}</button>
-          {query.q && <Link href="/platform" className="min-h-11 rounded-xl px-3 py-2.5 text-sm text-muted underline underline-offset-2 hover:text-ink">{t("admin.clear")}</Link>}
-        </form>
-
-        {list.items.length === 0 ? (
-          <p role="status" className="p-8 text-center text-sm text-muted">
-            {query.q ? t("admin.emptySearch", { q: query.q }) : t("admin.empty")}
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[60rem] text-left text-sm">
-              <caption className="sr-only">{t("admin.caption")}</caption>
-              <thead className="bg-canvas text-xs uppercase tracking-wide text-muted">
-                <tr>
-                  <th scope="col" className="px-4 py-3 font-semibold">{t("admin.colBusiness")}</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">{t("admin.colPlan")}</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">{t("admin.colStatus")}</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">{t("admin.colChannels")}</th>
-                  <th scope="col" className="px-4 py-3 text-right font-semibold">{t("admin.colConv")}</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">{t("admin.colAi")}</th>
-                  <th scope="col" className="px-4 py-3 text-right font-semibold">{t("admin.colTeam")}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {list.items.map((x) => (
-                  <tr key={x.id}>
-                    <th scope="row" className="px-4 py-3 font-normal">
-                      <span className="block font-semibold text-ink">{x.name}</span>
-                      <span className="block text-xs text-muted">{x.slug} · {t("admin.since", { date: sinceLabel(x.createdAt, locale) })}</span>
-                    </th>
-                    <td className="px-4 py-3"><Badge>{t(`admin.plan.${x.plan}`)}</Badge></td>
-                    <td className="px-4 py-3">
-                      <span className="flex flex-wrap gap-1">
-                        <Badge tone={STATUS_TONE[x.status] ?? "neutral"}>{t(`admin.status.${x.status}`)}</Badge>
-                        {aiPercent(x) >= 100 && <Badge tone="warn">{t("admin.capReached")}</Badge>}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {x.connectedChannels > 0
-                        ? <Badge tone="info">{t("admin.channels", { n: x.connectedChannels })}</Badge>
-                        : <span className="text-xs text-muted">{t("admin.noChannels")}</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-ink">{nf.format(x.conversationsThisMonth)}</td>
-                    <td className="px-4 py-3"><AiCell tenant={x} t={t} locale={locale} /></td>
-                    <td className="px-4 py-3 text-right tabular-nums text-ink">{nf.format(x.members)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <section className="mb-4 grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+        <Card>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-base font-semibold text-ink">{t("ov.chart")}</h2>
+            <span className="text-xs text-muted">{t("ov.chartDays", { days: v.days })} · {t("ov.chartTotal", { n: nf.format(v.conversations) })}</span>
           </div>
-        )}
+          <DayBars days={s.byDay} t={t} label={`${t("ov.chart")} · ${t("ov.chartTotal", { n: v.conversations })}`} />
+          <p className="mt-3 text-sm text-ink">{t("ov.cost", { cost: usd(v.costMonth), proj: usd(v.costProjection) })}</p>
+          <p className="text-xs text-muted">{t("ov.costNote")}</p>
+        </Card>
+        <Card>
+          <h2 className="text-base font-semibold text-ink">{t("ov.alerts")}</h2>
+          {v.alerts.length === 0 ? (
+            <p role="status" className="mt-3 text-sm text-muted">{t("ov.alertsNone")}</p>
+          ) : (
+            <ul className="mt-2 divide-y divide-line">
+              {v.alerts.map((a, i) => (
+                <li key={`${a.kind}-${a.tenantId}-${i}`} className="flex items-start gap-3 py-3">
+                  <span aria-hidden="true" className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${SEV[a.severity]}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-ink">{a.tenantName}</p>
+                    <p className="text-sm text-muted">{t(`alert.${a.kind}`, { channel: t(`ch.${a.channel ?? ""}`), pct: a.pct ?? 0, days: a.days ?? 0 })}</p>
+                  </div>
+                  <Link href={`/platform/tenants/${encodeURIComponent(a.tenantId)}`} className="inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-brand hover:bg-canvas">
+                    {t("view")}<span className="sr-only"> {a.tenantName}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </section>
 
-        {pages > 1 && (
-          <nav aria-label={t("admin.pagination")} className="flex flex-wrap items-center justify-between gap-2 border-t border-line p-4 text-sm">
-            <span className="text-muted">{t("admin.pageOf", { page: query.page, pages })}</span>
-            <span className="flex gap-2">
-              {query.page > 1 && <Link rel="prev" href={pageHref(query.q, query.page - 1)} className="min-h-11 rounded-xl border border-line px-4 py-2.5 text-ink hover:bg-canvas">{t("admin.prev")}</Link>}
-              {query.page < pages && <Link rel="next" href={pageHref(query.q, query.page + 1)} className="min-h-11 rounded-xl border border-line px-4 py-2.5 text-ink hover:bg-canvas">{t("admin.next")}</Link>}
-            </span>
-          </nav>
-        )}
-      </Card>
-
-      <p className="mt-4 text-xs text-muted">{t("admin.privacy")} {t("admin.month", { month })}</p>
+      <section className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">{t("ov.byPlan")}</p>
+          <p className="mt-2 text-sm text-ink">{plans.map(([p, n]) => `${t(`plan.${p}`)} ${n}`).join(" · ")}</p>
+          <div aria-hidden="true" className="mt-2 flex h-2 gap-[2px] overflow-hidden rounded-full">
+            {plans.filter(([, n]) => n > 0).map(([p, n]) => <span key={p} className={PLAN_BG[p]} style={{ width: `${(n / planTotal) * 100}%` }} />)}
+          </div>
+        </Card>
+        <Card>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">{t("ov.channels")}</p>
+          <p className="mt-2 text-sm text-ink">{connected.length ? connected.map((c) => `${t(`ch.${c.channel}`)} ${c.count}`).join(" · ") : t("ov.channelsNone")}</p>
+          {errors > 0 && <p className="mt-1 text-xs text-danger">{t("ov.channelsErr", { n: errors })}</p>}
+        </Card>
+        <Card>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">{t("ov.holds")}</p>
+          <p className="mt-2 text-sm text-ink">{t("ov.holdsHint", { n: s.legalHolds, t: s.legalHoldTenants })}</p>
+          <Link href="/platform/compliance" className="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand underline-offset-2 hover:underline">{t("nav.compliance")}</Link>
+        </Card>
+      </section>
+      <Privacy t={t} />
     </>
   );
 }

@@ -13,12 +13,13 @@ import { retentionRepo } from "./retention";
 import { brandRepo, settingsRepo } from "./settings";
 import { customersRepo, dashboardPrefsRepo, eventsRepo, notesRepo } from "./team";
 import { pushRepo } from "./push";
+import { platformRepo } from "./platform";
 
 /** `db` is injectable for tests; by default the service-role client from the environment. */
 export function createSupabaseStore(db: Db = createServiceClient()): DataStore {
   return {
     backend: "supabase",
-    tenants: tenantsRepo(db), platformAdmins: platformAdminsRepo(db), members: membersRepo(db), users: usersRepo(db),
+    tenants: tenantsRepo(db), platformAdmins: platformAdminsRepo(db), platform: platformRepo(db), members: membersRepo(db), users: usersRepo(db),
     settings: settingsRepo(db), brand: brandRepo(db),
     sections: sectionsRepo(db), sources: sourcesRepo(db), chunks: chunksRepo(db),
     conversations: conversationsRepo(db), messages: messagesRepo(db),

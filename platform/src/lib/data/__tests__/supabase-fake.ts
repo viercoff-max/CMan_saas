@@ -361,6 +361,60 @@ const RPCS: Record<string, (db: FakeSupabase, a: Row) => unknown> = {
     });
     return { total: all.length, items };
   },
+  // Mirrors 20261123100000_platform_console.sql (CROSS-TENANT, service_role only).
+  platform_stats(db, a) {
+    const nowIso = String(a.p_now ?? "");
+    const at = new Date(nowIso);
+    if (!nowIso || Number.isNaN(at.getTime())) throw new Fail(err("22023", "invalid_now"));
+    const days = Math.min(90, Math.max(1, Number(a.p_days ?? 30)));
+    const tid = a.p_tenant == null ? null : String(a.p_tenant);
+    const mine = (r: Row) => tid === null || r.tenant_id === tid;
+    const end = Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate());
+    const dayList = Array.from({ length: days }, (_, i) => new Date(end - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10));
+    const tenants = db.tables.tenants.filter((t) => tid === null || t.id === tid);
+    const by = (k: string, v: string) => tenants.filter((t) => t[k] === v).length;
+    const convs = db.tables.conversations.filter((c) => mine(c) && c.channel !== "simulator");
+    const dayOf = (v: unknown) => new Date(String(v)).toISOString().slice(0, 10);
+    const waiting = convs.filter((c) => c.status === "needs_human");
+    const urgent = waiting.filter((c) => ["safety", "legal"].includes(String(c.escalation_reason ?? "")));
+    const groups = new Map<string, { channel: unknown; status: unknown; count: number }>();
+    for (const ch of db.tables.channel_accounts.filter(mine)) {
+      const k = `${ch.channel}|${ch.status}`;
+      const g = groups.get(k) ?? { channel: ch.channel, status: ch.status, count: 0 };
+      g.count++; groups.set(k, g);
+    }
+    const period = `${at.toISOString().slice(0, 7)}-01`;
+    const usage = db.tables.ai_usage.filter((u) => mine(u) && u.period === period);
+    const holds = db.tables.conversations.filter((c) => mine(c) && c.legal_hold === true);
+    const last = new Map<string, string>();
+    for (const c of convs) { const v = new Date(String(c.last_message_at)).toISOString(); const k = String(c.tenant_id); if (!last.has(k) || v > last.get(k)!) last.set(k, v); }
+    return {
+      tenants: { total: tenants.length, active: by("status", "active"), suspended: by("status", "suspended"), deleted: by("status", "deleted"), free: by("plan", "free"), pro: by("plan", "pro"), business: by("plan", "business") },
+      by_day: dayList.map((day) => ({ day, count: convs.filter((c) => dayOf(c.created_at) === day).length })),
+      waiting: {
+        total: waiting.length, urgent: urgent.length, urgent_tenants: new Set(urgent.map((c) => c.tenant_id)).size,
+        oldest_urgent_at: urgent.length ? urgent.map((c) => new Date(String(c.last_message_at)).toISOString()).sort()[0] : null,
+      },
+      channels: [...groups.values()].sort((x, y) => cmp(x.channel, y.channel) || cmp(x.status, y.status)),
+      channel_errors: db.tables.channel_accounts.filter((c) => mine(c) && c.status === "error")
+        .sort((x, y) => cmp(x.tenant_id, y.tenant_id) || cmp(x.channel, y.channel)).slice(0, 100).map((c) => ({ tenant_id: c.tenant_id, channel: c.channel })),
+      ai: { input: usage.reduce((s, u) => s + Number(u.input_tokens), 0), output: usage.reduce((s, u) => s + Number(u.output_tokens), 0) },
+      legal_holds: { total: holds.length, tenants: new Set(holds.map((c) => c.tenant_id)).size },
+      activity: [...last].map(([tenant_id, last_message_at]) => ({ tenant_id, last_message_at })),
+    };
+  },
+  platform_lift_legal_hold(db, a) {
+    const tid = requireTenant(a);
+    if (!["resolved", "no_risk", "authority_release", "error"].includes(String(a.p_reason ?? ""))) throw new Fail(err("22023", "invalid_reason"));
+    if (!String(a.p_actor ?? "").trim()) throw new Fail(err("22004", "actor_required"));
+    const c = db.tables.conversations.find((x) => x.tenant_id === tid && x.id === a.p_conversation && x.legal_hold === true);
+    if (!c) return false;
+    c.legal_hold = false;
+    if (["safety", "legal"].includes(String(c.escalation_reason ?? ""))) c.escalation_reason = null;
+    const st = { ...((c.state ?? {}) as Row) }; delete st.legalHold; c.state = st;
+    db.tables.audit_log.push({ ...SCHEMA.audit_log.defaults(), tenant_id: tid, actor: String(a.p_actor).slice(0, 80), action: "platform.legal_hold.lifted", detail: `${a.p_conversation} ${a.p_reason}` });
+    return true;
+  },
   rate_limit_hit(db, a) {
     const key = String(a.p_key), limit = Number(a.p_limit), win = Number(a.p_window_ms), t = Number(a.p_now);
     const rows = db.tables.rate_limits;

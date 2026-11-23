@@ -9,11 +9,12 @@ import { retention } from "./retention";
 import { brand, settings } from "./settings";
 import { customers, dashboardPrefs, events, notes } from "./team";
 import { push } from "./push";
+import { platform } from "./platform";
 
 export function createSqliteStore(): DataStore {
   return {
     backend: "sqlite",
-    tenants, platformAdmins, members, users, settings, brand, sections, sources, chunks, conversations, messages, customers, notes, events, dashboardPrefs, push,
+    tenants, platformAdmins, platform, members, users, settings, brand, sections, sources, chunks, conversations, messages, customers, notes, events, dashboardPrefs, push,
     addons, channels, secrets, audit, usage, limiter, rateLimits, retention,
   };
 }

@@ -217,11 +217,15 @@ describe("tenant scoping of every query the Supabase backend issued", () => {
     // Phase 2 notices: a device (endpoint) is unique across businesses; the person reads their own notices on any business.
     { name: "push.removeEndpoint / subscribe (by endpoint)", match: (q) => q.table === "push_subscriptions" && q.kind === "delete" && has(q, "endpoint") && q.filters.length === 1 },
     { name: "push.latestNotices (by user)", match: (q) => q.table === "notifications" && q.kind === "select" && has(q, "user_id") && !has(q, "tenant_id") },
+    // Platform console (lib/platform/*, after platformAdmins.isPlatformAdmin): read-only cross-tenant lists.
+    { name: "platform.legalHolds (all tenants)", match: (q) => q.table === "conversations" && q.kind === "select" && has(q, "legal_hold") && !has(q, "tenant_id") },
+    { name: "platform.audit (all tenants, by action prefix)", match: (q) => q.table === "audit_log" && q.kind === "select" && has(q, "action", "like") && !has(q, "tenant_id") },
+    { name: "platform.demoTenantIds", match: (q) => q.table === "audit_log" && q.kind === "select" && q.filters.length === 1 && q.filters[0].col === "action" && q.filters[0].val === "demo.business" },
     { name: "audit.log (global row)", match: (q) => q.table === "audit_log" && q.kind === "insert" && !!q.rows?.length && q.rows.every((r) => r.tenant_id === null) },
   ];
   const tenantScoped = (q: Recorded): boolean => {
     // Global RPCs: the rate limiter and the platform-admin tenant list (tenants.listAll, CROSS-TENANT by design).
-    if (q.kind === "rpc") return q.table === "rate_limit_hit" || q.table === "platform_tenant_overview" || UUID.test(String(q.args?.p_tenant ?? ""));
+    if (q.kind === "rpc") return q.table === "rate_limit_hit" || q.table === "platform_tenant_overview" || q.table === "platform_stats" || UUID.test(String(q.args?.p_tenant ?? ""));
     if (q.table === "platform_admins") return q.kind === "select" && has(q, "user_id"); // global role lookup
     if (!TENANT_TABLES.includes(q.table)) {
       // tenants: by id / slug only, or the retention job's id listing; global counters are not tenant-owned.
@@ -239,7 +243,7 @@ describe("tenant scoping of every query the Supabase backend issued", () => {
     // ...and the suite really exercised every tenant-owned table and every cross-tenant path.
     for (const t of TENANT_TABLES) expect(fake.log.some((q) => q.table === t), t).toBe(true);
     for (const c of CROSS_TENANT) expect(fake.log.some(c.match), c.name).toBe(true);
-    for (const fn of ["rate_limit_hit", "usage_add", "conversation_touch", "retention_purge_tenant", "retention_delete_conversations", "platform_tenant_overview"])
+    for (const fn of ["rate_limit_hit", "usage_add", "conversation_touch", "retention_purge_tenant", "retention_delete_conversations", "platform_tenant_overview", "platform_stats", "platform_lift_legal_hold"])
       expect(fake.log.some((q) => q.kind === "rpc" && q.table === fn), fn).toBe(true);
   });
 });
