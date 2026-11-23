@@ -51,6 +51,8 @@ export async function purgeOldData(tenantId?: string, now: Date = new Date()): P
     const files = await deleteOutboxFor(t, p.deletedConversationIds);
     // Customer records left without any conversation hold personal data (name, email, phone): delete them too.
     await data.customers.deleteOrphans(t).catch(() => console.error("[retention] orphan customers cleanup failed"));
+    // Notices (phase 2) only matter for a few minutes; keep 30 days for the record.
+    await data.push.purgeNotices(t, new Date(now.getTime() - 30 * DAY_MS).toISOString()).catch(() => console.error("[retention] notices cleanup failed"));
     res.messagesDeleted += msgs; res.conversationsDeleted += convs; res.messagesMasked += masked; res.outboxFilesDeleted += files;
     if (msgs || convs || masked || files)
       await data.audit.log(t, "system", "retention.purge", JSON.stringify({ days, messages: msgs, conversations: convs, masked, outbox: files }));

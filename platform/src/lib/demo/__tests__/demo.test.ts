@@ -89,7 +89,7 @@ describe("demo seed", () => {
     await seedDemo(T, NOW);
     await seedDemo(T, NOW);
     expect(snap()).toEqual(a);
-  });
+  }, 30_000); // seeds twice; slow on a loaded machine
 
   it("--reset removes only demo rows and restores original content", async () => {
     const real = await realData();

@@ -6,6 +6,7 @@ import { getData } from "../data";
 import { ALWAYS_ON_SECTIONS, getEffectiveSectionContent } from "../context/section-repo";
 import { getOrdersConnector as defaultGetOrdersConnector } from "../connectors/registry";
 import { notifyHandoff as defaultNotifyHandoff } from "../channels/handoff";
+import { notifyHandoff as pushHandoff } from "../push/notify";
 import { detectActionRequest, detectEscalation, formatBusinessHours, isOpenNow, parseBusinessHours, type EscalationReason } from "./escalate";
 import { detectLanguage, type Lang } from "./lang";
 import { defaultLLM, estimateCallTokens, normalizeLLMResult, offlineLLM, totalInputTokens, type LLM, type LLMRequest, type LLMResult } from "./llm";
@@ -107,6 +108,7 @@ export async function handleInbound(ev: EngineInboundEvent, deps: EngineDeps = {
     // Put it in the human queue once so nobody is left unanswered; the bot stays silent.
     await data.conversations.setStatus(tenantId, conv.id, "needs_human", "bot_disabled");
     await safeNotify(d, tenantId, conv.id, "bot_disabled");
+    await pushHandoff(tenantId, conv.id, conv.channel, "bot_disabled");
     return { text: "", escalated: false };
   }
   if (conv.status === "resolved") await data.conversations.setStatus(tenantId, conv.id, "bot");
@@ -405,6 +407,7 @@ async function escalate(
     meta: clean({ ...meta, lang: ctx.lang, escalated: true, escalationReason: reason, outsideHours: open === false || undefined }),
   });
   await safeNotify(ctx.deps, ctx.tenantId, ctx.conv.id, reason);
+  await pushHandoff(ctx.tenantId, ctx.conv.id, ctx.conv.channel, reason); // phone / computer notices (never throws)
   return { text, escalated: true, reason };
 }
 

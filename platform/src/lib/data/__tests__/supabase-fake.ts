@@ -72,6 +72,9 @@ export const SCHEMA: Record<string, Spec> = {
     tenant: true, unique: [pk("conversation_notes", ["id"])], defaults: () => ({ id: randomUUID(), author_user_id: null, created_at: now() }),
     refs: [{ cols: ["tenant_id", "conversation_id"], table: "conversations", to: ["tenant_id", "id"] }],
   },
+  push_subscriptions: { tenant: true, unique: [pk("push_subscriptions", ["id"]), uq("push_subscriptions", ["endpoint"])], defaults: () => ({ id: randomUUID(), user_agent: "", created_at: now(), last_ok_at: null }) },
+  notification_prefs: { tenant: true, unique: [pk("notification_prefs", ["tenant_id", "user_id"])], defaults: () => ({ waiting: true, urgent: true, assigned: true, updated_at: now() }) },
+  notifications: { tenant: true, unique: [pk("notifications", ["id"])], defaults: () => ({ id: randomUUID(), body: "", url: "/inbox", created_at: now() }) },
   dashboard_prefs: { tenant: true, unique: [pk("dashboard_prefs", ["tenant_id", "user_id"])], defaults: () => ({ cards: [], updated_at: now() }) },
   conversation_events: {
     tenant: true, unique: [pk("conversation_events", ["id"])], defaults: () => ({ id: randomUUID(), actor_user_id: null, detail: {}, created_at: now() }),

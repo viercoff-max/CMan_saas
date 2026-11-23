@@ -632,6 +632,32 @@ export function defineDataStoreContract(t: ContractTarget): void {
       });
     });
 
+    describe("notices: devices, preferences and notices", () => {
+      it("per person and per business; cross-tenant negative; a device moves to whoever subscribes it last", async () => {
+        const A = await newTenant("pa"), B = await newTenant("pb");
+        const u = randomUUID(), v = randomUUID();
+        const e1 = `https://fcm.googleapis.com/fcm/send/${randomUUID()}`;
+        expect(await data.push.getPrefs(A, u)).toEqual({ waiting: true, urgent: true, assigned: true });
+        await data.push.savePrefs(A, u, { waiting: false, urgent: true, assigned: false });
+        expect(await data.push.getPrefs(A, u)).toEqual({ waiting: false, urgent: true, assigned: false });
+        expect(await data.push.getPrefs(B, u)).toEqual({ waiting: true, urgent: true, assigned: true });
+        await data.push.subscribe(A, u, e1, "Chrome");
+        expect((await data.push.devicesFor(A, [u, v])).map((d) => d.endpoint)).toEqual([e1]);
+        expect(await data.push.devicesFor(B, [u])).toEqual([]);
+        expect(await data.push.unsubscribe(B, u, e1)).toBe(false); // other tenant
+        await data.push.subscribe(B, v, e1, "Chrome"); // same device, now another person / business
+        expect(await data.push.listDevices(A, u)).toEqual([]);
+        expect((await data.push.listDevices(B, v)).map((d) => d.endpoint)).toEqual([e1]);
+        await data.push.removeEndpoint(e1);
+        expect(await data.push.listDevices(B, v)).toEqual([]);
+        await data.push.addNotice(A, u, { kind: "waiting", title: "t1", body: "", url: "/inbox" });
+        await data.push.addNotice(B, v, { kind: "urgent", title: "t2", body: "", url: "/inbox" });
+        expect((await data.push.latestNotices(u, "2000-01-01T00:00:00.000Z")).map((n) => n.title)).toEqual(["t1"]);
+        expect(await data.push.purgeNotices(B, "2999-01-01T00:00:00.000Z")).toBe(1);
+        expect((await data.push.latestNotices(u, "2000-01-01T00:00:00.000Z")).map((n) => n.title)).toEqual(["t1"]); // A untouched
+      });
+    });
+
     describe("tenant status", () => {
       it("isActive, webhook routing and the AI budget follow tenants.status; other tenants are unaffected", async () => {
         const S = await newTenant("susp"), K = await newTenant("keep");

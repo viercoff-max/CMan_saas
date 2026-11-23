@@ -3,6 +3,7 @@
 import { getData } from "../data";
 import type { Session } from "../auth";
 import type { Conversation, ConversationStatus } from "../types";
+import { notifyAssigned } from "../push/notify";
 
 /** Members of the active tenant (id + display name) for the assign menu. */
 export async function teamDirectory(tenantId: string): Promise<{ userId: string; name: string; role: string }[]> {
@@ -21,6 +22,7 @@ export async function assignConversation(s: Pick<Session, "tenantId" | "userId">
     actorUserId: s.userId, kind: userId ? "assigned" : "unassigned", detail: userId ? { to: userId, from: conv.assignedTo ?? null } : { from: conv.assignedTo ?? null },
   });
   await data.audit.log(s.tenantId, s.userId, userId ? "inbox.assign" : "inbox.unassign", conv.id);
+  if (userId) await notifyAssigned(s.tenantId, conv.id, userId, s.userId);
   return { ok: true, assignedTo: userId };
 }
 

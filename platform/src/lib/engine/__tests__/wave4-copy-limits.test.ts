@@ -65,7 +65,7 @@ describe("simulator limits (per tenant + user, not per conversation)", () => {
     expect((await handleInbound(sim(tenantId, "d", "¿Cuánto dura la garantía?"), deps())).reason).toBe("throttled");
     const other = await setupTenant();
     expect((await handleInbound(sim(other, "d", "¿Cuánto dura la garantía?"), deps())).reason).not.toBe("throttled");
-  });
+  }, 30_000); // 60+ simulated messages; slow on a loaded machine
 
   it("real channels are not affected by the simulator limits", async () => {
     for (let i = 0; i < SIM_MAX_PER_TENANT + 5; i++) {

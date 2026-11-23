@@ -11,7 +11,12 @@ export const metadata: Metadata = {
   description: "Asistente que contesta a tus clientes en Telegram y pasa la conversación a una persona cuando hace falta.",
   applicationName: PLATFORM_BRAND.name,
   robots: NOINDEX,
+  // Installable app (phase 2): manifest from app/manifest.ts, icons in public/ (scripts/make-icons.mjs).
+  icons: { icon: "/icon-192.png", apple: "/apple-touch-icon.png" },
+  appleWebApp: { capable: true, title: PLATFORM_BRAND.name, statusBarStyle: "default" },
 };
+
+export const viewport = { themeColor: PLATFORM_BRAND.colors.primary };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale();

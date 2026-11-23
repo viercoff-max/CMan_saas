@@ -223,6 +223,22 @@ export function runMigrations(db: DatabaseSync): void {
       );
       CREATE INDEX IF NOT EXISTS idx_events_conv ON conversation_events(tenant_id, conversation_id, created_at);
     `)],
+    ["push_notifications", () => db.exec(`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE,
+        user_agent TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')), last_ok_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_push_subs_tenant_user ON push_subscriptions(tenant_id, user_id);
+      CREATE TABLE IF NOT EXISTS notification_prefs (
+        tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, waiting INTEGER NOT NULL DEFAULT 1, urgent INTEGER NOT NULL DEFAULT 1,
+        assigned INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (tenant_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+        body TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '/inbox', created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at);
+    `)],
     ["dashboard_prefs", () => db.exec(`
       CREATE TABLE IF NOT EXISTS dashboard_prefs (
         tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, cards TEXT NOT NULL DEFAULT '[]',

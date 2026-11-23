@@ -214,6 +214,9 @@ describe("tenant scoping of every query the Supabase backend issued", () => {
     { name: "users.count", match: (q) => q.table === "tenant_members" && q.kind === "select" && q.filters.length === 0 && q.columns === "user_id" },
     { name: "users.get", match: (q) => q.table === "tenant_members" && q.kind === "select" && has(q, "user_id") && q.filters.length === 1 },
     { name: "channels.findByWebhookId", match: (q) => q.table === "channel_accounts" && q.kind === "select" && has(q, "channel") && has(q, "webhook_id") && has(q, "status") && !has(q, "tenant_id") },
+    // Phase 2 notices: a device (endpoint) is unique across businesses; the person reads their own notices on any business.
+    { name: "push.removeEndpoint / subscribe (by endpoint)", match: (q) => q.table === "push_subscriptions" && q.kind === "delete" && has(q, "endpoint") && q.filters.length === 1 },
+    { name: "push.latestNotices (by user)", match: (q) => q.table === "notifications" && q.kind === "select" && has(q, "user_id") && !has(q, "tenant_id") },
     { name: "audit.log (global row)", match: (q) => q.table === "audit_log" && q.kind === "insert" && !!q.rows?.length && q.rows.every((r) => r.tenant_id === null) },
   ];
   const tenantScoped = (q: Recorded): boolean => {

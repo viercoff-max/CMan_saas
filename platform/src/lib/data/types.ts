@@ -256,6 +256,29 @@ export interface EventsRepo {
   /** Every event of the tenant since sinceIso (dashboard metrics), oldest first, capped by limit. */
   listSince(tenantId: string, sinceIso: string, limit?: number): Promise<ConversationEvent[]>;
 }
+export type NoticeKind = "waiting" | "urgent" | "assigned" | "test";
+export interface NotificationPrefs { waiting: boolean; urgent: boolean; assigned: boolean }
+export interface PushSubscriptionRow { id: string; tenantId: string; userId: string; endpoint: string; userAgent: string; createdAt: string }
+export interface NoticeRow { id: string; tenantId: string; userId: string; kind: NoticeKind; title: string; body: string; url: string; createdAt: string }
+/** Phase 2 notifications. Rows are per person AND per business; nothing here reads another tenant's rows except the
+ *  two documented cross-tenant helpers used by the push pipeline itself. */
+export interface PushRepo {
+  getPrefs(tenantId: string, userId: string): Promise<NotificationPrefs>;
+  savePrefs(tenantId: string, userId: string, p: NotificationPrefs): Promise<void>;
+  /** Saves (or moves to this person/business) the device's subscription. */
+  subscribe(tenantId: string, userId: string, endpoint: string, userAgent: string): Promise<void>;
+  unsubscribe(tenantId: string, userId: string, endpoint: string): Promise<boolean>;
+  listDevices(tenantId: string, userId: string): Promise<PushSubscriptionRow[]>;
+  /** Devices of these members of THIS tenant. */
+  devicesFor(tenantId: string, userIds: string[]): Promise<PushSubscriptionRow[]>;
+  /** CROSS-TENANT by design: a push service said the endpoint is gone (404/410). */
+  removeEndpoint(endpoint: string): Promise<void>;
+  addNotice(tenantId: string, userId: string, n: { kind: NoticeKind; title: string; body: string; url: string }): Promise<void>;
+  /** CROSS-TENANT by design (the person's own notices on any of their businesses): newest first since `sinceIso`. */
+  latestNotices(userId: string, sinceIso: string, limit?: number): Promise<NoticeRow[]>;
+  /** Retention: notices older than `beforeIso` are deleted. */
+  purgeNotices(tenantId: string, beforeIso: string): Promise<number>;
+}
 /** Per person, per business: which dashboard cards to show, in order. */
 export interface DashboardPrefsRepo {
   /** Null when the person never customised the dashboard. */
@@ -406,6 +429,7 @@ export interface DataStore {
   notes: NotesRepo;
   events: EventsRepo;
   dashboardPrefs: DashboardPrefsRepo;
+  push: PushRepo;
   addons: AddonsRepo;
   channels: ChannelsRepo;
   secrets: SecretsRepo;

@@ -93,3 +93,16 @@ contexto»), mensajes por día, horas pico (zona horaria del negocio), mensajes 
 responde el asistente, tu equipo (respuestas y asignadas), clientes nuevos y recurrentes, fuera de horario, consultas de
 pedidos y uso de IA con costo aproximado (solo administradores; precio de referencia Haiku 0.10 / 0.50 USD por millón
 de tokens, en `dashboard/page.tsx`). Definiciones exactas: `src/lib/metrics/dashboard.ts`.
+
+## Fase 2 publicada el 2026-11-23: avisos en el celular y la computadora
+Menú → «Notificaciones» (todas las personas del equipo):
+- **Activar avisos en este dispositivo** (Web Push), **Enviar prueba**, lista de dispositivos y **qué avisos** quiere
+  cada persona en cada negocio: casos urgentes (seguridad / legal), «un cliente necesita a una persona», «me asignaron
+  una conversación».
+- **App instalable**: manifiesto e íconos (`public/icon-*.png`, `scripts/make-icons.mjs`). iPhone necesita instalarla
+  («Compartir → Agregar a inicio», iOS 16.4+) para recibir avisos; Android y computadora funcionan desde el navegador.
+- **Privacidad**: el push va VACÍO; el teléfono pide el texto a `/api/push/latest` con la sesión de la persona. El aviso
+  nunca muestra el nombre ni los mensajes del cliente (solo tipo, canal y negocio). Solo se llama a los servicios de push
+  de los navegadores (lista permitida). Las llaves VAPID se derivan de `APP_SECRET` (no hay variable nueva; si se rota
+  `APP_SECRET`, cada persona vuelve a activar sus avisos).
+- Avisos guardados 30 días (purga). Pendiente: avisos por correo (requiere Resend) y por WhatsApp/Telegram al encargado.
