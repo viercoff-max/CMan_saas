@@ -278,6 +278,9 @@ describe("pure helpers", () => {
     expect(actorLabel("u-3", "privacy.customer_deleted", "u-1", t)).toBe("Equipo del negocio");
     expect(actorLabel("meta-deletion", "privacy.meta_deletion_request", "u-1", t)).toBe("Meta");
   });
+  it("every channel (and the simulator) has a name", () => {
+    for (const ch of ["telegram", "whatsapp", "instagram", "messenger", "manychat", "simulator"]) expect(t(`ch.${ch}`)).not.toBe(`ch.${ch}`);
+  });
   it("every Spanish key has an English one", () => {
     expect(Object.keys(consoleDict.en).sort()).toEqual(Object.keys(consoleDict.es).sort());
   });

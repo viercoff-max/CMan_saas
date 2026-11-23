@@ -53,7 +53,7 @@ export const consoleDict: Dict = {
     "alert.near_cap": "Va en {pct}% de su tope de IA del mes.",
     "alert.inactive": "Sin actividad de clientes en {days} días.",
 
-    "ch.telegram": "Telegram", "ch.whatsapp": "WhatsApp", "ch.instagram": "Instagram", "ch.messenger": "Messenger", "ch.manychat": "ManyChat",
+    "ch.telegram": "Telegram", "ch.whatsapp": "WhatsApp", "ch.instagram": "Instagram", "ch.messenger": "Messenger", "ch.manychat": "ManyChat", "ch.simulator": "Simulador",
     "chs.connected": "conectado", "chs.disconnected": "desconectado", "chs.error": "con error",
 
     "tn.title": "Negocios",
@@ -231,7 +231,7 @@ export const consoleDict: Dict = {
     "alert.near_cap": "At {pct}% of this month's AI cap.",
     "alert.inactive": "No customer activity in {days} days.",
 
-    "ch.telegram": "Telegram", "ch.whatsapp": "WhatsApp", "ch.instagram": "Instagram", "ch.messenger": "Messenger", "ch.manychat": "ManyChat",
+    "ch.telegram": "Telegram", "ch.whatsapp": "WhatsApp", "ch.instagram": "Instagram", "ch.messenger": "Messenger", "ch.manychat": "ManyChat", "ch.simulator": "Simulator",
     "chs.connected": "connected", "chs.disconnected": "disconnected", "chs.error": "error",
 
     "tn.title": "Businesses",
