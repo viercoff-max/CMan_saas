@@ -11,6 +11,7 @@ import { loadShellBrand } from "@/lib/brand/server";
 import { loadInboxCounts } from "./inbox/counts";
 import { isDemoBusiness } from "@/lib/demo/business";
 import { DemoBanner } from "./DemoBanner";
+import { NoticeListener } from "@/components/NoticeListener";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           {demo && <DemoBanner canDelete={session.role === "owner"} />}
           {children}
         </div></main>
+        <NoticeListener />
       </div>
     </LocaleProvider>
   );

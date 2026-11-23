@@ -16,7 +16,11 @@ const nextConfig: NextConfig = {
   // and would delete platform/AGENTS.md (it contains only that block, and CLAUDE.md imports it). If `next dev`
   // rewrites the block, commit the change (see the note inside AGENTS.md).
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // The service worker must never be cached, so every device picks up a new version on its next visit.
+      { source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }, { key: "Service-Worker-Allowed", value: "/" }] },
+    ];
   },
 };
 

@@ -10,6 +10,11 @@ self.addEventListener("push", (event) => {
       const r = await fetch("/api/push/latest", { credentials: "include", cache: "no-store" });
       if (r.ok) { const j = await r.json(); if (j && j.notice) n = j.notice; }
     } catch { /* offline: generic notice */ }
+    // Every open Conversa window gets the notice (in-app message + live counters).
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of windows) c.postMessage({ type: "conversa-notice", notice: n });
+    // The person is looking at Conversa right now: the in-app message is enough (no double notice).
+    if (windows.some((c) => c.visibilityState === "visible" && c.focused)) return;
     await self.registration.showNotification(n.title, {
       body: n.body, icon: "/icon-192.png", badge: "/icon-192.png", tag: n.id || n.kind,
       requireInteraction: n.kind === "urgent", data: { url: n.url },
