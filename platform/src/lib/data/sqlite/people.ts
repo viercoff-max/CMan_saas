@@ -80,6 +80,14 @@ export const platformAdmins: PlatformAdminsRepo = {
     const r = db().prepare("SELECT email FROM users WHERE id = ?").get(userId) as Row | undefined;
     return !!r && allowed.has(String(r.email ?? "").toLowerCase());
   },
+  async list() {
+    const allowed = [...platformAdminEmails()];
+    if (!allowed.length) return [];
+    const rs = db().prepare(
+      `SELECT id, name, email, created_at FROM users WHERE lower(email) IN (${allowed.map(() => "?").join(", ")}) ORDER BY created_at, id LIMIT 50`,
+    ).all(...allowed) as Row[];
+    return rs.map((r) => ({ userId: String(r.id), name: String(r.name ?? ""), email: String(r.email ?? ""), since: r.created_at ? sqliteIso(r.created_at) : null }));
+  },
 };
 
 const role = (r: unknown): MemberRole => (r === "owner" || r === "agent" ? r : "admin");

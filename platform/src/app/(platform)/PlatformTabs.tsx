@@ -10,6 +10,7 @@ const TABS = [
   { href: "/platform/tenants", key: "nav.tenants" },
   { href: "/platform/compliance", key: "nav.compliance" },
   { href: "/platform/audit", key: "nav.audit" },
+  { href: "/platform/settings", key: "nav.settings" },
 ] as const;
 
 export function PlatformTabs({ label }: { label: string }) {

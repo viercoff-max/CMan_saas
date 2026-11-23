@@ -80,6 +80,14 @@ export function platformAdminsRepo(db: Db): PlatformAdminsRepo {
       if (!isUuid(userId)) return false;
       return !!(await one(db.from("platform_admins").select("user_id").eq("user_id", userId).maybeSingle(), "platformAdmins.isPlatformAdmin"));
     },
+    async list() {
+      const rs = await rows(db.from("platform_admins").select("user_id, created_at").order("created_at").order("user_id").limit(50), "platformAdmins.list");
+      return Promise.all(rs.map(async (r) => {
+        const u = await authUser(db, r.user_id as string);
+        const since = r.created_at ? new Date(String(r.created_at)) : null;
+        return { userId: r.user_id as string, name: u?.name ?? "", email: u?.email ?? "", since: since && !Number.isNaN(since.getTime()) ? since.toISOString() : null };
+      }));
+    },
   };
 }
 

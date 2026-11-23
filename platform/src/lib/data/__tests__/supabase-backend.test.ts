@@ -221,6 +221,7 @@ describe("tenant scoping of every query the Supabase backend issued", () => {
     { name: "platform.legalHolds (all tenants)", match: (q) => q.table === "conversations" && q.kind === "select" && has(q, "legal_hold") && !has(q, "tenant_id") },
     { name: "platform.audit (all tenants, by action prefix)", match: (q) => q.table === "audit_log" && q.kind === "select" && has(q, "action", "like") && !has(q, "tenant_id") },
     { name: "platform.demoTenantIds", match: (q) => q.table === "audit_log" && q.kind === "select" && q.filters.length === 1 && q.filters[0].col === "action" && q.filters[0].val === "demo.business" },
+    { name: "platformAdmins.list (global role)", match: (q) => q.table === "platform_admins" && q.kind === "select" && q.filters.length === 0 && q.columns === "user_id, created_at" },
     { name: "audit.log (global row)", match: (q) => q.table === "audit_log" && q.kind === "insert" && !!q.rows?.length && q.rows.every((r) => r.tenant_id === null) },
   ];
   const tenantScoped = (q: Recorded): boolean => {

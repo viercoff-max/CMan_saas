@@ -109,7 +109,9 @@ Menú → «Notificaciones» (todas las personas del equipo):
 
 ## Consola de la plataforma publicada el 2026-11-23 (solo para los dueños de la plataforma)
 - `/platform` (Resumen), `/platform/tenants` (Negocios con filtros), `/platform/tenants/<id>` (ficha y acciones),
-  `/platform/compliance` (Cumplimiento) y `/platform/audit` (Bitácora). Cualquier otra persona recibe 404.
+  `/platform/compliance` (Cumplimiento), `/platform/audit` (Bitácora) y `/platform/settings` (Configuración, solo
+  lectura: administradores, IA, retención e integraciones configuradas sí/no, nunca valores de claves). Cualquier otra
+  persona recibe 404. Los administradores se agregan o quitan en SQL (`public.platform_admins`), no desde la consola.
 - Acciones: suspender (motivo + escribir la dirección corta), reactivar, cambiar plan, ajustar tope de IA, borrar demo y
   levantar una retención legal (motivo obligatorio; atómico con su registro). Todo queda en la bitácora con códigos, sin
   texto libre. Máximo 60 acciones por hora por administrador.
@@ -117,5 +119,5 @@ Menú → «Notificaciones» (todas las personas del equipo):
   service_role; prueba `supabase/tests/platform_console.sql`). Solo conteos: nunca mensajes ni datos de clientes finales.
 - Costo de IA: estimado con precios de lista de Claude Haiku 5.5 (`AI_PRICE_INPUT_PER_MTOK` / `AI_PRICE_OUTPUT_PER_MTOK`
   para cambiarlos). "IA hoy" es lo reservado contra `PLATFORM_DAILY_TOKEN_CAP` (cota superior, no el gasto exacto).
-- Pendiente: registrar solicitudes ARCO manuales (hoy se ven las que cada negocio atiende y las de Meta), pestaña de
-  configuración (administradores de la plataforma), soporte asistido y facturación.
+- Pendiente: registrar solicitudes ARCO manuales (hoy se ven las que cada negocio atiende y las de Meta), soporte
+  asistido y facturación.

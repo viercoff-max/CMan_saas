@@ -360,6 +360,12 @@ export function defineDataStoreContract(t: ContractTarget): void {
         const { admin, other } = await t.makePlatformAdmin(T);
         expect(await data.platformAdmins.isPlatformAdmin(admin)).toBe(true);
         expect(await data.platformAdmins.isPlatformAdmin(other)).toBe(false);
+        const list = await data.platformAdmins.list();
+        expect(list.map((a) => a.userId)).toContain(admin);
+        expect(list.map((a) => a.userId)).not.toContain(other);
+        const me = list.find((a) => a.userId === admin)!;
+        expect(me.email.toLowerCase()).toMatch(/^pa-.*@example\.test$/);
+        expect(me.name).toBe("PA");
       });
 
       it("global audit rows (no tenant) are accepted and never show up in a tenant's log", async () => {

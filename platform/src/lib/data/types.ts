@@ -111,7 +111,13 @@ export interface UsersRepo {
 export interface PlatformAdminsRepo {
   /** CROSS-TENANT (global role). False for unknown / malformed ids. */
   isPlatformAdmin(userId: string): Promise<boolean>;
+  /**
+   * CROSS-TENANT (global role; console Configuración, only after isPlatformAdmin): the platform admins, oldest first,
+   * max 50. SQLite: local users whose email is in PLATFORM_ADMIN_EMAILS (since = the user's creation).
+   */
+  list(): Promise<PlatformAdminRow[]>;
 }
+export interface PlatformAdminRow { userId: string; name: string; email: string; since: string | null }
 
 // ---------------- platform console (owner of the platform only) ----------------
 /** Counts only: never message text, customer names or contact data. */

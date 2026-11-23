@@ -5,13 +5,15 @@
 import { getData } from "../data";
 import { DataValidationError } from "../data/errors";
 import {
-  LEGAL_HOLD_LIFT_REASONS, type LegalHoldRow, type Member, type PlatformAuditRow, type PlatformStats, type TenantInfo,
+  LEGAL_HOLD_LIFT_REASONS, type LegalHoldRow, type Member, type PlatformAdminRow, type PlatformAuditRow, type PlatformStats, type TenantInfo,
   type TenantOverview, type TenantPlan,
 } from "../data/types";
 import { hashKey, hit } from "../security/rate-limit";
 import { platformDailyCap } from "../engine/spend";
 import { deleteDemoBusiness } from "../demo/business";
-import { retentionDays } from "../retention";
+import { legalHoldMaskDays, outboxRetentionDays, retentionDays } from "../retention";
+import { SUPABASE_FREE_TOKEN_CAP, TENANT_DEFAULTS } from "../data/rules";
+import { selectProvider, type Provider } from "../engine/llm";
 import { aiPercent, parsePlatformQuery, recordPlatformView, requirePlatformAdmin, type PlatformAdmin } from "./admin";
 
 const DAY_MS = 86_400_000;
@@ -225,6 +227,52 @@ export async function loadAuditLog(now = new Date()): Promise<AuditView> {
   const name = new Map(rows.map((r) => [r.id, r.name]));
   // "platform.view" (one row per admin per hour) is noise here.
   return { admin, rows: log.filter((r) => r.action !== "platform.view").map((r) => ({ ...r, tenantName: r.tenantId ? name.get(r.tenantId) ?? "—" : "—" })) };
+}
+
+// ---------------------------------------------------------------- settings (read-only)
+
+export type SettingState = "ok" | "missing" | "warn";
+export const INTEGRATION_KEYS = ["ai", "meta", "instagram", "shopify", "publicUrl", "unsigned", "email"] as const;
+export interface IntegrationStatus { key: (typeof INTEGRATION_KEYS)[number]; state: SettingState }
+
+/** Whether each integration is configured. Booleans only: never a value, a prefix or a length of any secret. */
+export function integrationStatus(env: Record<string, string | undefined> = process.env): IntegrationStatus[] {
+  const set = (k: string) => !!env[k]?.trim();
+  const url = env.PUBLIC_URL?.trim() ?? "";
+  return [
+    { key: "ai", state: set("ANTHROPIC_API_KEY") || set("OPENAI_API_KEY") ? "ok" : "missing" },
+    { key: "meta", state: set("META_APP_SECRET") && set("META_VERIFY_TOKEN") ? "ok" : "missing" },
+    { key: "instagram", state: set("META_IG_APP_SECRET") ? "ok" : "missing" },
+    { key: "shopify", state: set("SHOPIFY_API_KEY") && set("SHOPIFY_API_SECRET") ? "ok" : "missing" },
+    { key: "publicUrl", state: url.startsWith("https://") ? "ok" : url ? "warn" : "missing" },
+    { key: "unsigned", state: set("ALLOW_UNSIGNED_WEBHOOKS") ? "warn" : "ok" },
+    // The platform's own sender (Resend SMTP) is not built yet: sign-up mail goes through Supabase's default sender.
+    { key: "email", state: "warn" },
+  ];
+}
+
+export interface SettingsView {
+  admin: PlatformAdmin; admins: PlatformAdminRow[]; backend: string;
+  ai: { provider: Provider; model: string; dailyCap: number; reservedToday: number; newTenantCap: number; prices: { input: number; output: number }; customPrices: boolean };
+  retention: { conversations: number; legalHoldMask: number; outbox: number };
+  integrations: IntegrationStatus[];
+}
+
+export async function loadSettings(now = new Date(), env: Record<string, string | undefined> = process.env): Promise<SettingsView> {
+  const admin = await requirePlatformAdmin();
+  const data = getData();
+  const [admins, reservedToday] = await Promise.all([data.platformAdmins.list(), data.platform.aiReservedToday(now)]);
+  const { provider, model } = selectProvider(env); // the key it also returns is dropped here
+  return {
+    admin, admins, backend: data.backend,
+    ai: {
+      provider, model, dailyCap: platformDailyCap(env), reservedToday,
+      newTenantCap: data.backend === "supabase" ? SUPABASE_FREE_TOKEN_CAP : TENANT_DEFAULTS.aiMonthlyTokenCap,
+      prices: aiPrices(env), customPrices: !!(env.AI_PRICE_INPUT_PER_MTOK?.trim() || env.AI_PRICE_OUTPUT_PER_MTOK?.trim()),
+    },
+    retention: { conversations: retentionDays(), legalHoldMask: legalHoldMaskDays(), outbox: outboxRetentionDays() },
+    integrations: integrationStatus(env),
+  };
 }
 
 // ---------------------------------------------------------------- actions (admin only, audited)

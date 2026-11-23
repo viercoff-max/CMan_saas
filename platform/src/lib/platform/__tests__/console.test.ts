@@ -43,7 +43,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
     return { ok: n <= limit, retryAfterS: 0 };
   },
 }));
-vi.mock("@/lib/retention", () => ({ retentionDays: () => 90 }));
+vi.mock("@/lib/retention", () => ({ retentionDays: () => 90, legalHoldMaskDays: () => 365, outboxRetentionDays: () => 30 }));
 vi.mock("@/lib/demo/business", () => ({
   deleteDemoBusiness: async (id: string) => {
     if (!h.demo.has(id)) return { ok: false, error: "not_demo" };
@@ -73,7 +73,13 @@ const STATS: PlatformStats = {
 vi.mock("@/lib/data", () => ({
   getData: () => ({
     backend: "supabase",
-    platformAdmins: { isPlatformAdmin: async (u: string) => { h.calls.push(`isPlatformAdmin:${u}`); return h.admins.has(u); } },
+    platformAdmins: {
+      isPlatformAdmin: async (u: string) => { h.calls.push(`isPlatformAdmin:${u}`); return h.admins.has(u); },
+      list: async () => { h.calls.push("platform.admins"); return [
+        { userId: "u-platform", name: "Carla", email: "carla@example.test", since: "2026-11-19T00:00:00Z" },
+        { userId: "u-other", name: "Otro", email: "otro@example.test", since: null },
+      ]; },
+    },
     tenants: {
       listAll: async () => { h.calls.push("listAll"); return { items: TENANTS, total: TENANTS.length, period: "2026-11-01" }; },
       get: async (id: string) => { const t = TENANTS.find((x) => x.id === id); return t ? { ...t } : null; },
@@ -108,8 +114,9 @@ vi.mock("@/lib/data", () => ({
 }));
 
 import {
-  aiCostUsd, buildAlerts, changePlan, deleteDemoTenant, isInactive, liftLegalHold, loadAuditLog, loadCompliance, loadOverview,
-  loadTenantDetail, loadTenants, matchesFilter, parseFilter, projectMonth, reactivateTenant, setAiCap, suspendTenant, type TenantRow,
+  aiCostUsd, buildAlerts, changePlan, deleteDemoTenant, integrationStatus, isInactive, liftLegalHold, loadAuditLog, loadCompliance,
+  loadOverview, loadSettings, loadTenantDetail, loadTenants, matchesFilter, parseFilter, projectMonth, reactivateTenant, setAiCap,
+  suspendTenant, type TenantRow,
 } from "@/lib/platform/console";
 import { actorLabel, describeEvent } from "@/lib/platform/format";
 import { makeT } from "@/lib/i18n";
@@ -118,6 +125,7 @@ import OverviewPage from "@/app/(platform)/platform/page";
 import TenantPage from "@/app/(platform)/platform/tenants/[id]/page";
 import CompliancePage from "@/app/(platform)/platform/compliance/page";
 import AuditPage from "@/app/(platform)/platform/audit/page";
+import SettingsPage from "@/app/(platform)/platform/settings/page";
 
 const session = (userId: string, role: "owner" | "admin" | "agent"): AuthState => ({
   status: "ok", session: { userId, tenantId: "t-a", role, name: "Persona", email: `${userId}@example.test`, tenants: [{ id: "t-a", name: "Panadería Uno", role }] },
@@ -134,7 +142,7 @@ beforeEach(() => {
 
 describe("access (cross-tenant negative)", () => {
   const everything = () => [
-    loadOverview({}, NOW), loadTenants({}, NOW), loadTenantDetail("t-a", NOW), loadCompliance(NOW), loadAuditLog(NOW),
+    loadOverview({}, NOW), loadTenants({}, NOW), loadTenantDetail("t-a", NOW), loadCompliance(NOW), loadAuditLog(NOW), loadSettings(NOW, {}),
     suspendTenant("t-a", "payment", "panaderia-uno"), reactivateTenant("t-b"), changePlan("t-a", "business", "upgrade"),
     setAiCap("t-a", 5, "season"), deleteDemoTenant("t-d", "demo-abc"), liftLegalHold("t-a", "c-1", "resolved"),
   ];
@@ -246,9 +254,44 @@ describe("loaders and pages (platform admin)", () => {
     expect(a).toContain("Cambió el tope de IA");
     expect(a).not.toContain("Entró a la consola"); // platform.view is hidden
   });
+
+  it("settings: admins, AI, retention and integrations; never a secret value", async () => {
+    const env = {
+      ANTHROPIC_API_KEY: "sk-ant-SECRET-123", META_APP_SECRET: "meta-SECRET-456", META_VERIFY_TOKEN: "verify-SECRET-789",
+      PUBLIC_URL: "https://conversa.example", PLATFORM_DAILY_TOKEN_CAP: "4000000", AI_PRICE_INPUT_PER_MTOK: "0.2",
+    };
+    const v = await loadSettings(NOW, env);
+    expect(v.admins.map((a) => a.userId)).toEqual(["u-platform", "u-other"]);
+    expect(v.ai).toMatchObject({ provider: "anthropic", model: "claude-haiku-5-5", dailyCap: 4_000_000, reservedToday: 2_050_000, newTenantCap: 300_000, customPrices: true });
+    expect(v.ai.prices).toEqual({ input: 0.2, output: 0.5 });
+    expect(v.retention).toEqual({ conversations: 90, legalHoldMask: 365, outbox: 30 });
+    expect(JSON.stringify(v)).not.toMatch(/SECRET/);
+    for (const [k, val] of Object.entries(env)) vi.stubEnv(k, val);
+    let page: string;
+    try { page = html(await SettingsPage()); } finally { vi.unstubAllEnvs(); }
+    expect(page).toContain("Anthropic (Claude)");
+    expect(page).toContain("$0.20 entrada");
+    expect(page).toContain("Administradores de la plataforma");
+    expect(page).toContain("carla@example.test");
+    expect(page).toContain("(tú)");
+    expect(page).toContain("insert into public.platform_admins");
+    expect(page).toContain("Retención de datos");
+    expect(page).toContain("Integraciones");
+    for (const secret of [env.ANTHROPIC_API_KEY, env.META_APP_SECRET, env.META_VERIFY_TOKEN, "sk-ant"]) expect(page).not.toContain(secret);
+  });
 });
 
 describe("pure helpers", () => {
+  it("integration status: booleans only, unsigned webhooks and plain-http URLs are flagged", () => {
+    const st = (env: Record<string, string>) => Object.fromEntries(integrationStatus(env).map((i) => [i.key, i.state]));
+    expect(st({})).toMatchObject({ ai: "missing", meta: "missing", shopify: "missing", publicUrl: "missing", unsigned: "ok" });
+    expect(st({ OPENAI_API_KEY: "x", META_APP_SECRET: "x", PUBLIC_URL: "http://x", ALLOW_UNSIGNED_WEBHOOKS: "1" }))
+      .toMatchObject({ ai: "ok", meta: "missing", publicUrl: "warn", unsigned: "warn" });
+    expect(st({ SHOPIFY_API_KEY: "k", SHOPIFY_API_SECRET: "s", META_APP_SECRET: "a", META_VERIFY_TOKEN: "b", PUBLIC_URL: "https://x" }))
+      .toMatchObject({ shopify: "ok", meta: "ok", publicUrl: "ok" });
+    expect(JSON.stringify(integrationStatus({ ANTHROPIC_API_KEY: "sk-ant-zzz" }))).not.toContain("zzz");
+  });
+
   const row = (p: Partial<TenantRow>): TenantRow => ({ ...TENANTS[0], demo: false, lastActivityAt: null, aiPct: 0, ...p });
   it("inactive: 30 days without customer messages, or never and older than 30 days", () => {
     expect(isInactive(row({ lastActivityAt: "2026-10-20T00:00:00Z" }), NOW)).toBe(true);
