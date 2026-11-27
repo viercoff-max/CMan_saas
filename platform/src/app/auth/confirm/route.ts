@@ -40,10 +40,10 @@ function confirmPage(tokenHash: string, type: EmailOtpType, next: string): Respo
   const c = COPY[type] ?? COPY.default;
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex"><title>${esc(c.title)}</title>
-<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;background:#f6f7f9;color:#14181f}
-main{max-width:380px;margin:16px;padding:24px;background:#fff;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-h1{font-size:20px;margin:0 0 8px}p{font-size:14px;line-height:1.5;color:#4b5563;margin:0 0 20px}
-button{width:100%;min-height:44px;border:0;border-radius:10px;background:#0f766e;color:#fff;font-size:15px;font-weight:600;cursor:pointer}</style></head>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;background:#f4f3fb;color:#16133d}
+main{max-width:380px;margin:16px;padding:24px;background:#fff;border:2px solid #16133d;border-radius:20px;box-shadow:6px 6px 0 #d11c7f}
+h1{font-size:20px;margin:0 0 8px}p{font-size:14px;line-height:1.5;color:#5b5880;margin:0 0 20px}
+button{width:100%;min-height:44px;border:2px solid #16133d;border-radius:999px;background:#d11c7f;color:#fff;font-size:15px;font-weight:600;cursor:pointer}</style></head>
 <body><main><h1>${esc(c.title)}</h1><p>${esc(c.body)}</p>
 <form method="post" action="/auth/confirm"><input type="hidden" name="token_hash" value="${esc(tokenHash)}"><input type="hidden" name="type" value="${esc(type)}"><input type="hidden" name="next" value="${esc(next)}">
 <button type="submit">${esc(c.button)}</button></form></main></body></html>`;

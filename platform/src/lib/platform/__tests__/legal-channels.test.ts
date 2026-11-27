@@ -2,23 +2,28 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CHANNEL_AVAILABILITY, availableChannels, channelChips, comingSoonChannels, listNames } from "../channels";
+import { CHANNEL_AVAILABILITY, CHANNEL_NAMES, CHAT_CHANNELS, availableChannels, channelChips, comingSoonChannels, listNames } from "../channels";
 import { LEGAL_FIELDS, PLATFORM_BRAND, missingLegalFields } from "../brand";
 import { deletion, fill, fillParts, landing, privacy, terms } from "../content";
 import { billingDict } from "@/app/(app)/billing/dict";
 import { LegalDocView } from "@/app/(marketing)/_components/LegalDocView";
 
 describe("channel availability (single source)", () => {
-  it("MVP: Telegram is live, WhatsApp is beta (own Meta app), Instagram and Messenger are coming soon", () => {
+  it("MVP: Telegram is live, WhatsApp is beta (own Meta app), Instagram, Messenger and e-mail are coming soon", () => {
     expect(availableChannels()).toEqual(["telegram", "whatsapp"]);
     expect(CHANNEL_AVAILABILITY.whatsapp).toBe("beta");
-    expect(comingSoonChannels()).toEqual(["instagram", "messenger"]);
-    expect(listNames(comingSoonChannels(), "es")).toBe("Instagram y Messenger");
+    expect(comingSoonChannels()).toEqual(["instagram", "messenger", "email"]);
+    expect(listNames(comingSoonChannels(), "es")).toBe("Instagram, Messenger y Correo");
+    expect(listNames(comingSoonChannels(), "en")).toBe("Instagram, Messenger and Email");
   });
   it("the public landing and the billing copy say the same thing", () => {
     expect(landing.es.channels).toEqual(channelChips("es"));
     for (const ch of landing.es.channels) expect(ch.state).toBe(ch.name === "Telegram" ? "Disponible" : ch.name === "WhatsApp" ? "Beta" : "Próximamente");
-    for (const [c, state] of Object.entries(CHANNEL_AVAILABILITY)) if (state === "soon") expect(billingDict.es["plan.pro.f1"]).toContain(c === "whatsapp" ? "WhatsApp" : c === "instagram" ? "Instagram" : "Messenger");
+    // The landing lead names live channels as live and the rest as "pronto", from the same source.
+    expect(landing.es.lead).toContain("en Telegram y WhatsApp (y pronto en Instagram, Messenger y correo)");
+    expect(landing.en.lead).toContain("on Telegram and WhatsApp (Instagram, Messenger and email soon)");
+    // Plan copy talks about chat channels (e-mail is a separate support channel).
+    for (const c of CHAT_CHANNELS) if (CHANNEL_AVAILABILITY[c] === "soon") expect(billingDict.es["plan.pro.f1"]).toContain(CHANNEL_NAMES[c]);
     expect(billingDict.es["plan.pro.f1"]).toMatch(/próximamente/);
     expect(billingDict.es["plan.pro.f1"]).toContain("WhatsApp (beta)");
   });

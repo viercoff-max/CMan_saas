@@ -1,7 +1,7 @@
 // Agent settings and brand settings (SQLite).
 import { newId, nowIso } from "../../ids";
 import type { AgentSettings } from "../../types";
-import { BRAND_DEFAULTS, clampCrossSell, clampTone, validateBrand } from "../rules";
+import { BRAND_DEFAULTS, clampCrossSell, clampTone, validateBrand, withCurrentDefaults } from "../rules";
 import type { BrandRepo, BrandSettings, SettingsRepo } from "../types";
 import { db, type Row } from "./conn";
 
@@ -56,11 +56,11 @@ function readBrand(tenantId: string): BrandSettings {
     const t = d.prepare("SELECT name FROM tenants WHERE id = ?").get(tenantId) as Row | undefined;
     return { tenantId, displayName: String(t?.name ?? ""), logoPath: null, ...BRAND_DEFAULTS, updatedAt: null };
   }
-  return {
+  return withCurrentDefaults({
     tenantId, displayName: r.display_name as string, logoPath: (r.logo_path as string) ?? null,
     primaryColor: r.primary_color as string, accentColor: r.accent_color as string, menuBgColor: r.menu_bg_color as string,
     headingFont: r.heading_font as string, updatedAt: r.updated_at as string,
-  };
+  });
 }
 
 export const brand: BrandRepo = {

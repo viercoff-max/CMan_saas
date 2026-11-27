@@ -8,7 +8,7 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
   return (
     <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">{title}</h1>
+        <h1 className="text-[1.7rem] font-extrabold leading-tight tracking-tight text-ink">{title}</h1>
         {subtitle && <p className="mt-1 max-w-2xl text-sm text-muted">{subtitle}</p>}
       </div>
       {action}
@@ -23,7 +23,7 @@ export function Card({ children, className }: { children: ReactNode; className?:
 type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "md" | "lg" };
 const btn = (variant: string, size: string) =>
   cx(
-    "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 disabled:cursor-not-allowed disabled:opacity-50",
+    "inline-flex min-h-11 items-center justify-center gap-2 rounded-full font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 disabled:cursor-not-allowed disabled:opacity-50",
     size === "lg" ? "px-5 py-3 text-base" : "px-4 py-2 text-sm",
     variant === "primary" && "bg-brand text-on-brand hover:bg-brand-dark",
     variant === "secondary" && "border border-line bg-surface text-ink hover:bg-canvas",

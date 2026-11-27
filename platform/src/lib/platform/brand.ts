@@ -3,18 +3,25 @@
 import type { Locale } from "../i18n-shared";
 
 export const PLATFORM_BRAND = {
-  /** Working name. Remove `provisional` once the final name is chosen. */
+  /** Final name (domain holaconversa.com). Set `provisional` back to true only if the name is reopened. */
   name: "Conversa",
-  provisional: true,
+  provisional: false,
   provisionalLabel: { es: "nombre provisional", en: "provisional name" } satisfies Record<Locale, string>,
+  /** "hola conversa" identity (design/landing-2026). Keep in sync with :root in globals.css. */
   colors: {
-    /** Buttons and links (white text reaches AA on it). */
-    primary: "#0F766E",
-    primaryDark: "#0B5C56",
-    /** Dark teal header / hero background (mockups 01 and 14). */
-    deep: "#0E1F1D",
-    deepText: "#E6F2F0",
-    deepMuted: "#9CC3BD",
+    /** Buganvilia: buttons, links and the "hola" bubble (white text 5.0:1, also 4.5:1 as text on the canvas). */
+    primary: "#D11C7F",
+    primaryDark: "#AE1569",
+    /** Tinta: dark header / hero bands. */
+    deep: "#16133D",
+    deepText: "#F1F0FA",
+    deepMuted: "#B9B5E6",
+    /** Mango: highlight stickers (with tinta text, 11:1). Jade: "resolved" states. Lila: customer bubbles. */
+    mango: "#FFC53D",
+    jade: "#0E9F7E",
+    lila: "#D9D4FA",
+    /** Cal: page background. */
+    canvas: "#F4F3FB",
   },
   /**
    * OWNER-FILLABLE legal fields (REVIEW-qa-2 P1-7). While any of them is null the legal pages show a highlighted

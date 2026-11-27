@@ -5,7 +5,7 @@
 // (never a plausible-looking gap like "(razón social por definir)"), see fillParts / LegalDocView.
 import type { Locale } from "../i18n-shared";
 import { LEGAL_FIELD_LABEL, PLATFORM_BRAND, type LegalField } from "./brand";
-import { channelChips } from "./channels";
+import { availableChannels, channelChips, comingSoonChannels, listNames, type PublicChannel } from "./channels";
 
 export interface LegalSection { h: string; p: string[] }
 export interface LegalDoc { title: string; description: string; intro: string; sections: LegalSection[] }
@@ -59,60 +59,223 @@ export const draftBanner = {
 } satisfies Record<Locale, { title: string; body: string }>;
 
 // ---------------- landing ----------------
+// Proposal B (design/landing-2026/PROPUESTA-B.md): customer SUPPORT for small, mid-size and large companies.
+// Channel availability always comes from lib/platform/channels.ts; the inbox and timeline examples only use channels
+// that work today, so the page never shows a conversation on a channel a visitor cannot connect yet.
+export type LandingState = "bot" | "team" | "done";
+export interface LandingRow { name: string; ch: PublicChannel; time: string; text: string; state: LandingState; label: string; selected?: boolean }
+export interface LandingPin { time: string; ch: PublicChannel; text: string; state: LandingState; label: string; at: number; high?: boolean }
+
+const sentenceList = (chs: readonly PublicChannel[], locale: Locale) =>
+  listNames(chs, locale).replace(/\bCorreo\b/, "correo").replace(/\bEmail\b/, "email");
+
+function landingLead(locale: Locale): string {
+  const live = sentenceList(availableChannels(), locale);
+  const soon = comingSoonChannels();
+  if (locale === "en") {
+    return `${PLATFORM_BRAND.name} answers the usual questions on ${live}${soon.length ? ` (${sentenceList(soon, "en")} soon)` : ""}. Whatever needs a person reaches your team with the whole conversation, so no customer has to explain twice.`;
+  }
+  return `${PLATFORM_BRAND.name} resuelve las preguntas de siempre en ${live}${soon.length ? ` (y pronto en ${sentenceList(soon, "es")})` : ""}. Lo que necesita a una persona llega a tu equipo con toda la conversación, para que nadie tenga que volver a explicar.`;
+}
+
 export const landing = {
   es: {
-    metaTitle: "Un asistente que contesta a tus clientes",
-    metaDescription: "Responde a tus clientes en Telegram y WhatsApp (Instagram y Messenger pronto), solo con la información de tu negocio, y pasa la conversación a una persona cuando hace falta.",
-    eyebrow: "Para cualquier negocio",
-    title: "Un asistente que contesta a tus clientes y te avisa cuando alguien necesita a una persona.",
-    lead: "Conecta tu bot de Telegram o tu WhatsApp, cuéntale sobre tu negocio y deja que conteste las preguntas de siempre. Tú y tu equipo atienden lo demás desde un solo panel.",
+    metaTitle: "Soporte al cliente que contesta a cualquier hora",
+    metaDescription: "Conversa contesta las preguntas de siempre de tus clientes y pasa a tu equipo lo que necesita a una persona, con toda la conversación. Para empresas pequeñas, medianas y grandes.",
+    nav: { how: "Cómo funciona", team: "Para tu equipo", sizes: "Empresas", trust: "Seguridad", pricing: "Precios" },
+    kicker: "Soporte al cliente con IA y con tu equipo",
+    titleBefore: "Tu soporte contesta, aunque sean las",
+    time: "3:07 a.m.",
+    lead: landingLead("es"),
     ctaPrimary: "Crear cuenta",
+    ctaSales: "Hablar con ventas",
+    ctaPlans: "Ver planes",
     ctaSecondary: "Entrar",
-    channelsTitle: "Canales",
+    channelsTitle: "Un solo lugar para",
     channels: channelChips("es"), // single source: lib/platform/channels.ts
-    featuresTitle: "Qué hace",
-    features: [
-      { h: "Contesta solo con tu información", p: "Responde a partir de lo que tú escribes o subes (productos, envíos, garantía, preguntas frecuentes). Si no lo sabe, no lo inventa: lo pasa a tu equipo." },
-      { h: "Pasa la conversación a una persona", p: "Cuando un cliente pide hablar con alguien, menciona un problema de seguridad o algo que el asistente no debe resolver, la conversación queda marcada para tu equipo." },
-      { h: "Tu equipo en un solo panel", p: "Todas las conversaciones en una bandeja: tomar, responder, devolver al asistente y marcar como resuelta. Con roles de administrador y agente." },
-      { h: "Con tu marca", p: "Tu equipo ve tu logo y tus colores, no los nuestros. Tus clientes hablan con el bot de tu negocio." },
-      { h: "Pruébalo antes de abrirlo", p: "Un simulador para chatear con tu asistente como si fueras un cliente, sin enviar nada a nadie." },
-      { h: "Cuidamos los datos", p: "Los mensajes se borran pasado un tiempo, los correos de los clientes se enmascaran y puedes pedir que se eliminen los datos de una persona." },
-    ],
-    stepsTitle: "Cómo empezar",
-    steps: [
-      "Crea tu cuenta y el perfil de tu negocio.",
-      "Escribe o sube la información que el asistente debe usar.",
-      "Conecta tu bot de Telegram o tu WhatsApp y pruébalo en el simulador.",
-    ],
+    inbox: {
+      label: "Ejemplo de la bandeja de soporte",
+      example: "Ejemplo",
+      title: "Bandeja de soporte",
+      filters: ["Todas", "Para tu equipo · 2", "Resueltas"],
+      rows: [
+        { name: "Mariana R.", ch: "whatsapp", time: "01:14", text: "No me llega el código para entrar", state: "bot", label: "contestó el asistente" },
+        { name: "Raúl C.", ch: "telegram", time: "07:02", text: "¿Me reenvían la factura del pedido 4821?", state: "bot", label: "contestó el asistente" },
+        { name: "Lalo M.", ch: "whatsapp", time: "12:30", text: "Mi pedido llegó dañado", state: "team", label: "para tu equipo · Ana", selected: true },
+        { name: "Jorge T.", ch: "telegram", time: "16:45", text: "¿Cómo cambio mi dirección?", state: "bot", label: "contestó el asistente" },
+        { name: "Sofía L.", ch: "whatsapp", time: "22:48", text: "Quiero cancelar mi suscripción", state: "team", label: "para tu equipo" },
+        { name: "Diana P.", ch: "telegram", time: "Ayer", text: "Gracias, ya quedó", state: "done", label: "resuelta" },
+      ] satisfies LandingRow[],
+      conv: {
+        who: "Lalo M. · WhatsApp",
+        since: "Cliente desde marzo · 3 conversaciones",
+        assigned: "Asignada a Ana",
+        assistant: "ASISTENTE",
+        messages: [
+          { from: "customer", text: "hola, mi pedido llegó con la tapa rota 😕", time: "12:30" },
+          { from: "assistant", text: "Lamento mucho eso. ¿Me compartes tu número de pedido para revisarlo?", time: "12:30" },
+          { from: "customer", text: "es el 4907", time: "12:31" },
+        ],
+        handoff: "↪ Pasada a tu equipo · motivo: producto dañado",
+        noteLabel: "NOTA INTERNA · ANA",
+        note: "Ya revisé el pedido 4907. Ofrecer reposición sin costo.",
+        composer: "Escribe tu respuesta…",
+        send: "Responder",
+      },
+    },
+    day: {
+      title: "Las preguntas no esperan a que abras.",
+      sub: "Un día de soporte. Lo que el asistente puede resolver, lo resuelve. Lo demás espera a tu equipo, en orden y con contexto.",
+      open: "tu horario de soporte · 9:00 a 19:00",
+      pins: [
+        { time: "01:14", ch: "whatsapp", text: "No me llega el código para entrar", state: "bot", label: "✓ contestó el asistente", at: 1.2 },
+        { time: "07:02", ch: "telegram", text: "¿Me reenvían la factura del pedido 4821?", state: "bot", label: "✓ contestó el asistente", at: 7, high: true },
+        { time: "12:30", ch: "whatsapp", text: "Mi pedido llegó dañado 😕", state: "team", label: "↪ lo tomó Ana", at: 12.5 },
+        { time: "16:45", ch: "telegram", text: "¿Cómo cambio mi dirección de envío?", state: "bot", label: "✓ contestó el asistente", at: 16.75, high: true },
+        { time: "22:48", ch: "whatsapp", text: "Quiero cancelar mi suscripción", state: "team", label: "↪ para tu equipo a las 9:00", at: 22.8 },
+      ] satisfies LandingPin[],
+    },
+    flow: {
+      title: "Del primer mensaje a resuelto, sin que el cliente repita nada.",
+      steps: [
+        { h: "Llega el mensaje", p: "Por cualquiera de tus canales. Todo cae en la misma bandeja." },
+        { h: "El asistente contesta", p: "Con tus políticas, guías y preguntas frecuentes. Si no sabe algo, no lo inventa." },
+        { h: "Pasa a tu equipo", p: "Quejas, cancelaciones, pagos o quien pida una persona. Llega con la conversación completa." },
+        { h: "Tu equipo resuelve", p: "Responde desde la bandeja, deja notas internas y la marca como resuelta." },
+      ],
+    },
+    sizes: {
+      title: "Para el tamaño de tu operación.",
+      sub: "Empieza con una persona contestando todo o con un equipo de soporte por turnos. Conversa crece contigo.",
+      items: [
+        { who: "EMPRESA PEQUEÑA", h: "Tú y el asistente", p: "El asistente contesta lo de siempre y te avisa cuando alguien te necesita.", items: ["Listo en una tarde", "Avisos en tu celular y tu computadora", "Simulador para probar antes de abrir"] },
+        { who: "EMPRESA MEDIANA", h: "Un equipo, una bandeja", p: "Todo tu equipo atiende desde el mismo lugar, sin pisarse ni dejar mensajes olvidados.", items: ["Asignación de conversaciones", "Roles de administrador y agente", "Notas internas e historial del cliente"] },
+        { who: "EMPRESA GRANDE", h: "Varias marcas, un control", p: "Cada marca o área con su asistente, su equipo y sus datos separados.", items: ["Cambia de marca con el mismo usuario", "Tu logo y tus colores en el panel", "Configuración asistida (con costo adicional)"] },
+      ],
+    },
+    team: {
+      title: "Hecho para el día a día de un equipo de soporte.",
+      items: [
+        { h: "Una bandeja para todo", p: "Todos tus canales en una sola lista, con filtros por estado." },
+        { h: "Pasa a una persona a tiempo", p: "Cuando el cliente lo pide, cuando el tema es delicado o cuando el asistente no sabe la respuesta." },
+        { h: "Asignación y estados", p: "Toma una conversación, asígnala, devuélvela al asistente o márcala como resuelta." },
+        { h: "Notas internas", p: "Tu equipo se deja contexto entre turnos. El cliente nunca las ve." },
+        { h: "Avisos al momento", p: "Cuando algo llega para tu equipo, se entera en el celular y en la computadora." },
+        { h: "Métricas en tu tablero", p: "Las conversaciones del día y cuántas necesitaron a tu equipo." },
+      ],
+    },
+    trust: {
+      title: "Los datos de tus clientes, bien cuidados.",
+      sub: "Lo que prometemos, por escrito.",
+      items: [
+        { h: "Datos separados", p: "Cada empresa ve solo sus conversaciones y sus clientes." },
+        { h: "Retención", p: "Los mensajes viejos se borran solos pasado un tiempo." },
+        { h: "Datos ocultos", p: "Los correos de tus clientes aparecen enmascarados en el panel." },
+        { h: "Derecho de borrado", p: "Si un cliente lo pide, se eliminan sus datos." },
+        { h: "Sin inventos", p: "El asistente solo usa tu información. Si no sabe algo, no lo inventa." },
+      ],
+    },
+    finalTitle: "Dile hola a cada cliente, a la hora que escriba.",
     honest: "Estamos en una etapa temprana: todavía no publicamos precios ni cifras de clientes.",
     pricingLink: "Ver planes",
   },
   en: {
-    metaTitle: "An assistant that answers your customers",
-    metaDescription: "Answer your customers on Telegram and WhatsApp (Instagram and Messenger soon), only from your business information, and hand the conversation to a person when needed.",
-    eyebrow: "For any business",
-    title: "An assistant that answers your customers and tells you when someone needs a person.",
-    lead: "Connect your Telegram bot or your WhatsApp, tell it about your business and let it answer the usual questions. You and your team handle the rest from one panel.",
+    metaTitle: "Customer support that answers at any hour",
+    metaDescription: "Conversa answers your customers' usual questions and hands whatever needs a person to your team, with the whole conversation. For small, mid-size and large companies.",
+    nav: { how: "How it works", team: "For your team", sizes: "Companies", trust: "Security", pricing: "Pricing" },
+    kicker: "Customer support with AI and your team",
+    titleBefore: "Your support answers, even at",
+    time: "3:07 a.m.",
+    lead: landingLead("en"),
     ctaPrimary: "Create account",
+    ctaSales: "Talk to sales",
+    ctaPlans: "See plans",
     ctaSecondary: "Sign in",
-    channelsTitle: "Channels",
+    channelsTitle: "One place for",
     channels: channelChips("en"),
-    featuresTitle: "What it does",
-    features: [
-      { h: "Answers only from your information", p: "It answers from what you write or upload (products, shipping, warranty, FAQ). If it does not know, it does not make it up: it passes the chat to your team." },
-      { h: "Hands the conversation to a person", p: "When a customer asks for someone, mentions a safety problem or something the assistant should not handle, the conversation is flagged for your team." },
-      { h: "Your team in one panel", p: "Every conversation in one inbox: take, reply, return to the assistant and mark as resolved. With admin and agent roles." },
-      { h: "With your brand", p: "Your team sees your logo and colours, not ours. Your customers talk to your business's bot." },
-      { h: "Try it before going live", p: "A simulator to chat with your assistant as if you were a customer, without sending anything to anyone." },
-      { h: "Careful with data", p: "Messages are deleted after a while, customer e-mails are masked and you can ask for a person's data to be deleted." },
-    ],
-    stepsTitle: "How to start",
-    steps: [
-      "Create your account and your business profile.",
-      "Write or upload the information the assistant should use.",
-      "Connect your Telegram bot or your WhatsApp and try it in the simulator.",
-    ],
+    inbox: {
+      label: "Example of the support inbox",
+      example: "Example",
+      title: "Support inbox",
+      filters: ["All", "For your team · 2", "Resolved"],
+      rows: [
+        { name: "Mariana R.", ch: "whatsapp", time: "01:14", text: "My sign-in code never arrives", state: "bot", label: "answered by the assistant" },
+        { name: "Raúl C.", ch: "telegram", time: "07:02", text: "Can you resend the invoice for order 4821?", state: "bot", label: "answered by the assistant" },
+        { name: "Lalo M.", ch: "whatsapp", time: "12:30", text: "My order arrived damaged", state: "team", label: "for your team · Ana", selected: true },
+        { name: "Jorge T.", ch: "telegram", time: "16:45", text: "How do I change my address?", state: "bot", label: "answered by the assistant" },
+        { name: "Sofía L.", ch: "whatsapp", time: "22:48", text: "I want to cancel my subscription", state: "team", label: "for your team" },
+        { name: "Diana P.", ch: "telegram", time: "Yesterday", text: "Thanks, all sorted", state: "done", label: "resolved" },
+      ] satisfies LandingRow[],
+      conv: {
+        who: "Lalo M. · WhatsApp",
+        since: "Customer since March · 3 conversations",
+        assigned: "Assigned to Ana",
+        assistant: "ASSISTANT",
+        messages: [
+          { from: "customer", text: "hi, my order arrived with a broken lid 😕", time: "12:30" },
+          { from: "assistant", text: "I am sorry about that. Could you share your order number so I can check it?", time: "12:30" },
+          { from: "customer", text: "it is 4907", time: "12:31" },
+        ],
+        handoff: "↪ Handed to your team · reason: damaged product",
+        noteLabel: "INTERNAL NOTE · ANA",
+        note: "Checked order 4907. Offer a free replacement.",
+        composer: "Write your reply…",
+        send: "Reply",
+      },
+    },
+    day: {
+      title: "Questions do not wait until you open.",
+      sub: "A day of support. What the assistant can solve, it solves. The rest waits for your team, in order and with context.",
+      open: "your support hours · 9:00 to 19:00",
+      pins: [
+        { time: "01:14", ch: "whatsapp", text: "My sign-in code never arrives", state: "bot", label: "✓ answered by the assistant", at: 1.2 },
+        { time: "07:02", ch: "telegram", text: "Can you resend the invoice for order 4821?", state: "bot", label: "✓ answered by the assistant", at: 7, high: true },
+        { time: "12:30", ch: "whatsapp", text: "My order arrived damaged 😕", state: "team", label: "↪ Ana took it", at: 12.5 },
+        { time: "16:45", ch: "telegram", text: "How do I change my delivery address?", state: "bot", label: "✓ answered by the assistant", at: 16.75, high: true },
+        { time: "22:48", ch: "whatsapp", text: "I want to cancel my subscription", state: "team", label: "↪ for your team at 9:00", at: 22.8 },
+      ] satisfies LandingPin[],
+    },
+    flow: {
+      title: "From the first message to resolved, without the customer repeating anything.",
+      steps: [
+        { h: "A message arrives", p: "On any of your channels. Everything lands in the same inbox." },
+        { h: "The assistant answers", p: "From your policies, guides and FAQ. If it does not know, it does not make it up." },
+        { h: "It reaches your team", p: "Complaints, cancellations, payments or anyone asking for a person. With the whole conversation." },
+        { h: "Your team resolves it", p: "Reply from the inbox, leave internal notes and mark it as resolved." },
+      ],
+    },
+    sizes: {
+      title: "For the size of your operation.",
+      sub: "Start with one person answering everything or with a support team working in shifts. Conversa grows with you.",
+      items: [
+        { who: "SMALL COMPANY", h: "You and the assistant", p: "The assistant answers the usual questions and tells you when someone needs you.", items: ["Ready in an afternoon", "Notices on your phone and computer", "A simulator to try it before going live"] },
+        { who: "MID-SIZE COMPANY", h: "One team, one inbox", p: "Your whole team works from the same place, without stepping on each other or forgetting messages.", items: ["Conversation assignment", "Admin and agent roles", "Internal notes and customer history"] },
+        { who: "LARGE COMPANY", h: "Several brands, one control", p: "Each brand or area with its own assistant, team and separate data.", items: ["Switch brands with the same user", "Your logo and colours in the panel", "Assisted setup (extra cost)"] },
+      ],
+    },
+    team: {
+      title: "Built for the day-to-day of a support team.",
+      items: [
+        { h: "One inbox for everything", p: "All your channels in one list, with filters by status." },
+        { h: "A person, right on time", p: "When the customer asks, when the topic is sensitive or when the assistant does not know the answer." },
+        { h: "Assignment and statuses", p: "Take a conversation, assign it, return it to the assistant or mark it as resolved." },
+        { h: "Internal notes", p: "Your team leaves context between shifts. The customer never sees them." },
+        { h: "Instant notices", p: "When something arrives for your team, they know on their phone and computer." },
+        { h: "Metrics on your dashboard", p: "Today's conversations and how many needed your team." },
+      ],
+    },
+    trust: {
+      title: "Your customers' data, well looked after.",
+      sub: "What we promise, in writing.",
+      items: [
+        { h: "Separate data", p: "Each company only sees its own conversations and customers." },
+        { h: "Retention", p: "Old messages are deleted automatically after a while." },
+        { h: "Masked data", p: "Your customers' e-mails are masked in the panel." },
+        { h: "Right to erasure", p: "If a customer asks, their data is deleted." },
+        { h: "No making things up", p: "The assistant only uses your information. If it does not know, it does not make it up." },
+      ],
+    },
+    finalTitle: "Say hello to every customer, whenever they write.",
     honest: "We are at an early stage: we do not publish prices or customer figures yet.",
     pricingLink: "See plans",
   },

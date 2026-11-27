@@ -1,7 +1,7 @@
 // Agent settings and brand settings (Supabase). isToneSaved/markToneSaved use agent_settings.tone_saved_at
 // (markToneSaved also writes the same "settings.save"/"tone" audit row as SQLite, so audit history matches).
 import { nowIso } from "../../ids";
-import { BRAND_DEFAULTS, clampCrossSell, clampTone, validateBrand } from "../rules";
+import { BRAND_DEFAULTS, clampCrossSell, clampTone, validateBrand, withCurrentDefaults } from "../rules";
 import type { BrandRepo, SettingsRepo } from "../types";
 import { scoped, type Db, type Scoped } from "./client";
 import { mapBrand, mapSettings, one, run, settingsToDb } from "./map";
@@ -45,7 +45,7 @@ export function settingsRepo(db: Db): SettingsRepo {
 export function brandRepo(db: Db): BrandRepo {
   async function readBrand(s: Scoped) {
     const r = await one(s.from("brand_settings").select("*").maybeSingle(), "brand.get");
-    if (r) return mapBrand(s.tenantId, r);
+    if (r) return withCurrentDefaults(mapBrand(s.tenantId, r));
     // Like create_tenant: the display name starts as the tenant name.
     const t = await one(db.from("tenants").select("name").eq("id", s.tenantId).maybeSingle(), "brand.get");
     return { tenantId: s.tenantId, displayName: String(t?.name ?? ""), logoPath: null, ...BRAND_DEFAULTS, updatedAt: null };

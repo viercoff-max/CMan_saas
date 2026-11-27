@@ -6,7 +6,20 @@ import { DataValidationError } from "./errors";
 import type { BrandSettings } from "./types";
 
 // ---------- brand (white-label) ----------
-export const BRAND_DEFAULTS = { primaryColor: "#0F766E", accentColor: "#14181F", menuBgColor: "#F6F7F9", headingFont: "system" } as const;
+export const BRAND_DEFAULTS = { primaryColor: "#D11C7F", accentColor: "#16133D", menuBgColor: "#FFFFFF", headingFont: "brand" } as const;
+/**
+ * The defaults before the "hola conversa" identity (also the column defaults of public.brand_settings). A row that
+ * still holds exactly these values was never customised, so it reads as the current defaults: existing tenants get
+ * the new identity without a data migration, and a tenant who did pick colours keeps them.
+ */
+export const LEGACY_BRAND_DEFAULTS = { primaryColor: "#0F766E", accentColor: "#14181F", menuBgColor: "#F6F7F9", headingFont: "system" } as const;
+type BrandLook = { primaryColor: string; accentColor: string; menuBgColor: string; headingFont: string };
+export function withCurrentDefaults<T extends BrandLook>(b: T): T {
+  const L = LEGACY_BRAND_DEFAULTS;
+  const same = (a: string, x: string) => String(a).toUpperCase() === x.toUpperCase();
+  const legacy = same(b.primaryColor, L.primaryColor) && same(b.accentColor, L.accentColor) && same(b.menuBgColor, L.menuBgColor) && b.headingFont === L.headingFont;
+  return legacy ? { ...b, ...BRAND_DEFAULTS } : b;
+}
 const HEX = /^#[0-9A-Fa-f]{6}$/;
 const FONT = /^[A-Za-z0-9 ]{1,60}$/;
 

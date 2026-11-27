@@ -7,7 +7,8 @@
 //     (dark mode) step by step until it reaches 4.5:1 on the surface AND the canvas;
 //   - menu text (--menu-ink / --menu-muted) re-checked against the tenant's menu background.
 // Every pair is unit-tested to be >= 4.5:1 (src/lib/brand/__tests__/theme.test.ts).
-// Fonts: system stacks only. next/font/google downloads font files at BUILD time (needs network), so no web fonts.
+// Fonts: system stacks, plus "brand" = the platform display face (Bricolage Grotesque, self-hosted by next/font in the
+// root layout and exposed as --font-display). No other web fonts: tenants pick from this fixed list only.
 
 export type Rgb = [number, number, number];
 const HEX6 = /^#[0-9A-Fa-f]{6}$/;
@@ -74,7 +75,8 @@ export function hoverOf(fill: string, on: string, t = 0.12): string {
 
 // ---------------- fonts (safe list) ----------------
 export const HEADING_FONTS = {
-  system: { es: "Del sistema (recomendada)", en: "System (recommended)", stack: 'ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif' },
+  brand: { es: "Conversa (recomendada)", en: "Conversa (recommended)", stack: 'var(--font-display), ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif' },
+  system: { es: "Del sistema", en: "System", stack: 'ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif' },
   serif: { es: "Clásica, con remates", en: "Classic serif", stack: 'ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif' },
   rounded: { es: "Redondeada", en: "Rounded", stack: 'ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Segoe UI", system-ui, sans-serif' },
   humanist: { es: "Moderna", en: "Modern", stack: 'Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", sans-serif' },
@@ -82,17 +84,17 @@ export const HEADING_FONTS = {
 export type HeadingFont = keyof typeof HEADING_FONTS;
 export const HEADING_FONT_KEYS = Object.keys(HEADING_FONTS) as HeadingFont[];
 export const isHeadingFont = (v: unknown): v is HeadingFont => typeof v === "string" && Object.hasOwn(HEADING_FONTS, v);
-/** Unknown / legacy names fall back to the system stack. */
+/** Unknown names fall back to the system stack. */
 export const fontStack = (key: string | null | undefined): string => HEADING_FONTS[isHeadingFont(key) ? key : "system"].stack;
 
 // ---------------- palette ----------------
 /** Platform default brand (same values as BRAND_DEFAULTS in src/lib/data/rules.ts; a test keeps them equal). */
-export const PLATFORM_BRAND = { primaryColor: "#0F766E", accentColor: "#14181F", menuBgColor: "#F6F7F9", headingFont: "system" } as const;
+export const PLATFORM_BRAND = { primaryColor: "#D11C7F", accentColor: "#16133D", menuBgColor: "#FFFFFF", headingFont: "brand" } as const;
 
 /** Neutral surfaces of globals.css (light / dark), which tenant themes never change. */
 export const SURFACES = {
-  light: { surface: "#FFFFFF", canvas: "#F6F7F9", ink: "#14181F", muted: "#5D6675" },
-  dark: { surface: "#161B22", canvas: "#0E1116", ink: "#EEF1F5", muted: "#9AA4B2" },
+  light: { surface: "#FFFFFF", canvas: "#F4F3FB", ink: "#16133D", muted: "#5B5880" },
+  dark: { surface: "#1B1840", canvas: "#110F2B", ink: "#F1F0FA", muted: "#A9A5D1" },
 } as const;
 export type Mode = keyof typeof SURFACES;
 

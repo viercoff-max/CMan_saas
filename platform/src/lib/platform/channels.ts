@@ -3,7 +3,7 @@
 // reviewed and live. Flip a value here to open a channel everywhere at once.
 import type { Locale } from "../i18n-shared";
 
-export type PublicChannel = "telegram" | "whatsapp" | "instagram" | "messenger";
+export type PublicChannel = "telegram" | "whatsapp" | "instagram" | "messenger" | "email";
 /** "beta" = usable today (connect form in /channels) but still being polished. */
 export type ChannelAvailability = "available" | "beta" | "soon";
 
@@ -12,12 +12,17 @@ export const CHANNEL_AVAILABILITY: Readonly<Record<PublicChannel, ChannelAvailab
   whatsapp: "beta", // manual connection with the business's own Meta app (lib/channels/whatsapp-own)
   instagram: "soon",
   messenger: "soon",
+  email: "soon", // support by e-mail: needs the outbound mail provider (Resend SMTP) first
 };
 
-export const CHANNEL_ORDER: readonly PublicChannel[] = ["telegram", "whatsapp", "instagram", "messenger"];
+export const CHANNEL_ORDER: readonly PublicChannel[] = ["telegram", "whatsapp", "instagram", "messenger", "email"];
 export const CHANNEL_NAMES: Readonly<Record<PublicChannel, string>> = {
-  telegram: "Telegram", whatsapp: "WhatsApp", instagram: "Instagram", messenger: "Messenger",
+  telegram: "Telegram", whatsapp: "WhatsApp", instagram: "Instagram", messenger: "Messenger", email: "Correo",
 };
+/** Display name in a language (only "email" is translated; the rest are brand names). */
+export const channelName = (c: PublicChannel, locale: Locale): string => (c === "email" && locale === "en" ? "Email" : CHANNEL_NAMES[c]);
+/** Chat channels (the ones a plan's channel allowance talks about); e-mail is a separate support channel. */
+export const CHAT_CHANNELS: readonly PublicChannel[] = ["telegram", "whatsapp", "instagram", "messenger"];
 
 export const isChannelAvailable = (c: PublicChannel) => CHANNEL_AVAILABILITY[c] !== "soon";
 export const availableChannels = () => CHANNEL_ORDER.filter(isChannelAvailable);
@@ -30,14 +35,14 @@ export const AVAILABILITY_LABEL: Readonly<Record<Locale, Record<ChannelAvailabil
 
 /** "WhatsApp, Instagram y Messenger" / "WhatsApp, Instagram and Messenger". */
 export function listNames(chs: readonly PublicChannel[], locale: Locale): string {
-  const n = chs.map((c) => CHANNEL_NAMES[c]);
+  const n = chs.map((c) => channelName(c, locale));
   if (n.length <= 1) return n.join("");
   return `${n.slice(0, -1).join(", ")} ${locale === "en" ? "and" : "y"} ${n[n.length - 1]}`;
 }
 
 /** Landing chips: [{ name, state }] in display order. */
-export function channelChips(locale: Locale): { name: string; state: string; available: boolean }[] {
-  return CHANNEL_ORDER.map((c) => ({ name: CHANNEL_NAMES[c], state: AVAILABILITY_LABEL[locale][CHANNEL_AVAILABILITY[c]], available: isChannelAvailable(c) }));
+export function channelChips(locale: Locale): { id: PublicChannel; name: string; state: string; available: boolean }[] {
+  return CHANNEL_ORDER.map((c) => ({ id: c, name: channelName(c, locale), state: AVAILABILITY_LABEL[locale][CHANNEL_AVAILABILITY[c]], available: isChannelAvailable(c) }));
 }
 
 /**

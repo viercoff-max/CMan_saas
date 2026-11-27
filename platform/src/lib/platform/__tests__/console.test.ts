@@ -248,7 +248,7 @@ describe("loaders and pages (platform admin)", () => {
   it("compliance and log pages", async () => {
     const c = html(await CompliancePage());
     expect(c).toContain("Solicitud de borrado desde Meta");
-    expect(c).toContain("WhatsApp · seguridad · desde hace 41 día(s)");
+    expect(c).toMatch(/WhatsApp · seguridad · desde hace \d+ día\(s\)/); // days counted from the real date
     expect(c).toContain("Levantar…");
     const a = html(await AuditPage());
     expect(a).toContain("Cambió el tope de IA");

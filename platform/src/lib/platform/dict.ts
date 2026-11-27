@@ -14,7 +14,7 @@ export const platformDict: Dict = {
     "footer.privacy": "Aviso de privacidad",
     "footer.terms": "Términos",
     "footer.deletion": "Eliminar mis datos",
-    "footer.note": "{brand} es un nombre provisional. Sitio en preparación.",
+    "footer.note": "© 2026 {brand} · Soporte al cliente con IA.",
 
     "admin.title": "Clientes",
     "admin.subtitle": "Todos los negocios en la plataforma. Esta vista usa la marca de {brand}, nunca la de un cliente. Solo lectura.",
@@ -72,7 +72,7 @@ export const platformDict: Dict = {
     "footer.privacy": "Privacy notice",
     "footer.terms": "Terms",
     "footer.deletion": "Delete my data",
-    "footer.note": "{brand} is a provisional name. Site in preparation.",
+    "footer.note": "© 2026 {brand} · AI customer support.",
 
     "admin.title": "Customers",
     "admin.subtitle": "Every business on the platform. This view uses the {brand} brand, never a customer's. Read-only.",

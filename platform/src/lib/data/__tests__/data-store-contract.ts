@@ -79,7 +79,7 @@ export function defineDataStoreContract(t: ContractTarget): void {
         expect((await data.settings.get(A)).agentName).not.toBe("Bot B");
         expect(await data.settings.isToneSaved(A)).toBe(false);
         expect((await data.brand.get(A)).displayName).toBe("Tenant A");
-        expect((await data.brand.get(A)).primaryColor).toBe("#0F766E");
+        expect((await data.brand.get(A)).primaryColor).toBe("#D11C7F");
         expect(await data.members.list(A)).toEqual([]);
         if (t.addMember) expect((await data.members.list(B)).map((m) => m.tenantId)).toEqual([B]);
       });
@@ -859,7 +859,7 @@ export function defineDataStoreContract(t: ContractTarget): void {
       it("brand defaults like Supabase, saves a patch, validates like the CHECK constraints", async () => {
         const T = await newTenant("brand", "Mi Marca");
         expect(await data.brand.get(T)).toMatchObject({
-          displayName: "Mi Marca", logoPath: null, primaryColor: "#0F766E", accentColor: "#14181F", menuBgColor: "#F6F7F9", headingFont: "system", updatedAt: null,
+          displayName: "Mi Marca", logoPath: null, primaryColor: "#D11C7F", accentColor: "#16133D", menuBgColor: "#FFFFFF", headingFont: "brand", updatedAt: null,
         });
         const saved = await data.brand.save(T, { primaryColor: "#aa00FF", headingFont: "Inter", logoPath: `${T}/logo.png` });
         expect(saved).toMatchObject({ displayName: "Mi Marca", primaryColor: "#aa00FF", headingFont: "Inter", logoPath: `${T}/logo.png` });
@@ -868,6 +868,14 @@ export function defineDataStoreContract(t: ContractTarget): void {
         await expect(data.brand.save(T, { headingFont: "Inter; } body { x" })).rejects.toBeInstanceOf(DataValidationError);
         await expect(data.brand.save(T, { displayName: "x".repeat(121) })).rejects.toBeInstanceOf(DataValidationError);
         expect((await data.brand.get(T)).primaryColor).toBe("#aa00FF");
+        // A row that still holds the pre-"hola conversa" defaults was never customised: it reads as the current
+        // defaults (no data migration). Any other colour is kept, and only this tenant is affected.
+        const O = await newTenant("brand-other", "Otra");
+        await data.brand.save(T, { primaryColor: "#0F766E", accentColor: "#14181F", menuBgColor: "#F6F7F9", headingFont: "system" });
+        expect(await data.brand.get(T)).toMatchObject({ primaryColor: "#D11C7F", accentColor: "#16133D", menuBgColor: "#FFFFFF", headingFont: "brand" });
+        await data.brand.save(O, { primaryColor: "#0F766E", accentColor: "#14181F", menuBgColor: "#F6F7F9", headingFont: "serif" });
+        expect(await data.brand.get(O)).toMatchObject({ primaryColor: "#0F766E", headingFont: "serif" });
+        expect((await data.brand.get(T)).headingFont).toBe("brand");
       });
     });
 

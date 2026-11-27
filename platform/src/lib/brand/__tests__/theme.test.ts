@@ -121,12 +121,19 @@ describe("contract with globals.css and the data layer", () => {
   it("platform default = BRAND_DEFAULTS of the data layer", () => {
     expect(PLATFORM_BRAND).toEqual(BRAND_DEFAULTS);
     expect(isPlatformDefault(BRAND_DEFAULTS)).toBe(true);
-    expect(isPlatformDefault({ ...BRAND_DEFAULTS, primaryColor: "#0f766e" })).toBe(true); // case-insensitive
+    expect(isPlatformDefault({ ...BRAND_DEFAULTS, primaryColor: "#d11c7f" })).toBe(true); // case-insensitive
     expect(isPlatformDefault({ ...BRAND_DEFAULTS, primaryColor: "#B42318" })).toBe(false);
     expect(isPlatformDefault({ ...BRAND_DEFAULTS, headingFont: "serif" })).toBe(false);
   });
-  it("fonts: a small safe list of system stacks, unknown names fall back to the system stack", () => {
-    expect(HEADING_FONT_KEYS).toEqual(["system", "serif", "rounded", "humanist"]);
+  it("neutral surfaces match :root in globals.css (light and dark)", () => {
+    for (const mode of ["light", "dark"] as const) {
+      for (const [k, v] of Object.entries(SURFACES[mode])) expect(css.toLowerCase(), `${mode} ${k}`).toContain(`--${k}: ${v.toLowerCase()};`);
+    }
+  });
+  it("fonts: the platform face plus a small safe list of system stacks; unknown names fall back to the system stack", () => {
+    expect(HEADING_FONT_KEYS).toEqual(["brand", "system", "serif", "rounded", "humanist"]);
+    expect(fontStack("brand")).toContain("var(--font-display)");
+    expect(PLATFORM_BRAND.headingFont).toBe("brand");
     for (const k of HEADING_FONT_KEYS) expect(k).toMatch(/^[A-Za-z0-9 ]{1,60}$/); // brand_settings CHECK
     expect(fontStack("Comic Sans; } body { x")).toBe(fontStack("system"));
     expect(fontStack(null)).toBe(fontStack("system"));

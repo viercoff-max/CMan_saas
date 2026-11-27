@@ -167,7 +167,8 @@ describe("/platform access", () => {
     expect(page).toContain('href="/platform/tenants/t-a"');
     const shell = html(await PlatformLayout({ children: null }));
     expect(shell).toContain(PLATFORM_BRAND.name);
-    expect(shell).toContain("nombre provisional");
+    expect(shell).toContain(">hola<"); // "hola conversa" wordmark
+    expect(shell).not.toContain("nombre provisional"); // the name is final
     h.locale = "en";
     expect(html(await PlatformPage(sp()))).toContain("Businesses");
   });
@@ -204,7 +205,8 @@ describe("helpers", () => {
     expect([compactNumber(950), compactNumber(1234), compactNumber(42_000), compactNumber(2_500_000)]).toEqual(["950", "1.2k", "42k", "2.5M"]);
   });
   it("platform name comes from one config", () => {
-    expect(platformDisplayName("es")).toBe(`${PLATFORM_BRAND.name} (nombre provisional)`);
+    expect(PLATFORM_BRAND.provisional).toBe(false);
+    expect(platformDisplayName("es")).toBe(PLATFORM_BRAND.name);
   });
 });
 
@@ -219,10 +221,16 @@ describe("public site", () => {
   it("'/' shows the landing with both CTAs to anonymous visitors, noindex", async () => {
     const page = html(await LandingPage());
     expect(page).toContain('href="/signup"');
-    expect(page).toContain('href="/login"');
+    expect(page).toContain('href="/precios"'); // no sales contact configured yet: the second action is the plans page
+    expect(page).not.toContain("mailto:");
     expect(page).toContain("Crear cuenta");
+    expect(page).toContain("Tu soporte contesta");
     expect(page).toContain("Telegram");
+    expect(page).toContain("Correo");
     expect(page).toContain("Próximamente");
+    // The inbox and timeline examples only show channels that work today.
+    expect(page).not.toMatch(/ch_(instagram|messenger|email)[^"]*"[^>]*>[IM@]<\/span><div class="min-w-0"/);
+    expect(page).not.toMatch(/\$\s?\d/); // still no prices
     expect((await landingMeta()).robots).toMatchObject({ index: false, follow: false });
   });
 

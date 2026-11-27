@@ -7,11 +7,11 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: PLATFORM_BRAND.name,
     short_name: PLATFORM_BRAND.name,
-    description: "Atiende a tus clientes y recibe avisos cuando alguien necesita a una persona.",
+    description: "Soporte al cliente con IA: atiende a tus clientes y recibe avisos cuando alguien necesita a una persona.",
     start_url: "/inbox",
     scope: "/",
     display: "standalone",
-    background_color: "#ffffff",
+    background_color: "#F4F3FB",
     theme_color: PLATFORM_BRAND.colors.primary,
     lang: "es",
     icons: [

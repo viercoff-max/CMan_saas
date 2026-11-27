@@ -88,7 +88,7 @@ describe("saveBrand", () => {
   it("admin save: stores the patch, audits the changed field names only", async () => {
     const A = await tenant("ad");
     const s = sess(A, "owner");
-    const r = await saveBrand(s, { primaryColor: "#b42318", accentColor: "#2E2B29", menuBgColor: "#F6F7F9", displayName: "Chefman" });
+    const r = await saveBrand(s, { primaryColor: "#b42318", accentColor: "#2E2B29", menuBgColor: "#FFFFFF", displayName: "Chefman" });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.changed.sort()).toEqual(["accentColor", "displayName", "primaryColor"]); // menuBgColor was already the default

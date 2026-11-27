@@ -5,7 +5,6 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { Card } from "@/components/ui";
 import { getLocale } from "@/lib/i18n";
 import { PLATFORM_BRAND } from "@/lib/platform/brand";
 import { PlatformWordmark, platformThemeStyle } from "@/lib/platform/ui";
@@ -25,14 +24,14 @@ export async function AuthCard({ title, subtitle, eyebrow, children, wide }: { t
     revalidatePath("/", "layout");
   }
   return (
-    <main style={platformThemeStyle} className="flex min-h-screen flex-col items-center justify-center gap-4 p-4">
+    <main style={platformThemeStyle} className="theme-light flex min-h-screen flex-col items-center justify-center gap-4 bg-canvas p-4 text-ink">
       <Link href="/" className="rounded-lg" aria-label={`${PLATFORM_BRAND.name} · ${c.home}`}><PlatformWordmark locale={locale} /></Link>
-      <Card className={`w-full ${wide ? "max-w-md" : "max-w-sm"}`}>
+      <div className={`w-full rounded-3xl border-2 border-ink bg-surface p-6 shadow-[6px_6px_0_var(--brand)] ${wide ? "max-w-md" : "max-w-sm"}`}>
         {eyebrow && <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{eyebrow}</p>}
-        <h1 className="text-xl font-semibold">{title}</h1>
+        <h1 className="text-2xl font-extrabold tracking-tight">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
         <div className="mt-4">{children}</div>
-      </Card>
+      </div>
       <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
         <Link href="/" className="inline-flex min-h-11 items-center rounded-lg px-3 text-muted hover:text-ink">{c.home}</Link>
         <form action={toggleLang}>
