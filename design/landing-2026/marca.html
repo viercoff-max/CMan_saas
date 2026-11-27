@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conversa · Identidad</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--cal:#F4F3FB;--tinta:#16133D;--buga:#E0218A;--mango:#FFC53D;--jade:#0E9F7E;--lila:#D9D4FA}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--cal);color:var(--tinta);font:16px/1.5 "Instrument Sans",sans-serif;padding:56px 64px;width:1440px}
+h1{font:800 44px/1 "Bricolage Grotesque";letter-spacing:-.04em}
+.lbl{font:600 12px "Martian Mono";color:var(--buga);letter-spacing:.04em;margin-bottom:14px;display:block}
+.grid{display:grid;grid-template-columns:1.25fr 1fr;gap:28px;margin-top:36px}
+.box{background:#fff;border:2px solid var(--tinta);border-radius:26px;padding:30px}
+.logo{display:inline-flex;align-items:center;gap:.3em;font:800 64px/1 "Bricolage Grotesque";letter-spacing:-.03em}
+.logo .b{position:relative;background:var(--buga);color:#fff;padding:.12em .36em .2em;border-radius:.45em .45em .45em .12em}
+.logo .b::after{content:"";position:absolute;left:-2px;bottom:-.22em;border-left:.34em solid var(--buga);border-bottom:.26em solid transparent}
+.logos{display:flex;flex-direction:column;gap:34px}
+.row{display:flex;gap:22px;align-items:center}
+.inv{background:var(--tinta);border-radius:18px;padding:22px 26px}
+.inv .logo{color:#fff;font-size:40px}
+.mark{width:96px;height:96px;border-radius:24px;background:var(--buga);display:grid;place-items:center;border:2px solid var(--tinta);box-shadow:4px 4px 0 var(--tinta)}
+.mark span{font:800 25px "Bricolage Grotesque";color:#fff;letter-spacing:-.04em;position:relative;background:none}
+.sw{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.s{border-radius:16px;border:2px solid var(--tinta);height:112px;padding:12px;display:flex;flex-direction:column;justify-content:flex-end;font:600 12px "Martian Mono"}
+.s b{font:700 17px "Bricolage Grotesque";display:block}
+.type .d{font:800 72px/.95 "Bricolage Grotesque";letter-spacing:-.045em}
+.type .m{font:600 14px "Martian Mono";background:var(--mango);display:inline-block;padding:6px 10px;border-radius:10px 10px 10px 3px;border:2px solid var(--tinta);margin-top:14px}
+.type p{margin-top:12px;font-size:17px;max-width:34em}
+.voice{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px}
+.voice div{border-radius:14px;padding:14px 16px;font-size:15px}
+.si{background:#E6F6F1;border:1.5px solid var(--jade)}
+.no{background:#FDE8F2;border:1.5px solid var(--buga)}
+.voice b{font:600 11px "Martian Mono";display:block;margin-bottom:6px}
+</style></head>
+<body>
+<h1>Identidad propuesta · hola conversa</h1>
+<div class="grid">
+  <div class="box logos">
+    <div><span class="lbl">LOGOTIPO</span><span class="logo"><span class="b">hola</span>conversa</span></div>
+    <div class="row">
+      <div class="inv"><span class="logo"><span class="b">hola</span>conversa</span></div>
+      <div class="mark" aria-label="Ícono de app"><span>hola</span></div>
+      <div style="font-size:14px;max-width:16em;color:#4a4677">El "hola" en burbuja es la marca: es la primera palabra de cada conversación y el nombre del dominio.</div>
+    </div>
+  </div>
+  <div class="box"><span class="lbl">COLOR</span>
+    <div class="sw">
+      <div class="s" style="background:#E0218A;color:#fff"><b>Buganvilia</b>#E0218A<br>acción</div>
+      <div class="s" style="background:#16133D;color:#fff"><b>Tinta</b>#16133D<br>texto</div>
+      <div class="s" style="background:#FFC53D"><b>Mango</b>#FFC53D<br>resalte</div>
+      <div class="s" style="background:#0E9F7E;color:#fff"><b>Jade</b>#0E9F7E<br>resuelto</div>
+      <div class="s" style="background:#D9D4FA"><b>Lila</b>#D9D4FA<br>cliente</div>
+      <div class="s" style="background:#F4F3FB"><b>Cal</b>#F4F3FB<br>fondo</div>
+    </div>
+  </div>
+  <div class="box type"><span class="lbl">TIPOGRAFÍA</span>
+    <div class="d">Bricolage Grotesque</div>
+    <span class="m">Martian Mono · 03:07</span>
+    <p>Instrument Sans para el texto: clara, cálida y fácil de leer en el celular. La mono se usa solo para horas y estados, como en un chat.</p>
+  </div>
+  <div class="box"><span class="lbl">VOZ</span>
+    <div class="voice">
+      <div class="si"><b>✓ ASÍ</b>"Si no sabe algo, no lo inventa: te lo pasa."</div>
+      <div class="no"><b>✕ ASÍ NO</b>"IA de última generación que revoluciona tu negocio."</div>
+      <div class="si"><b>✓ ASÍ</b>"Crear mi asistente"</div>
+      <div class="no"><b>✕ ASÍ NO</b>"Comenzar ahora gratis 🚀"</div>
+    </div>
+  </div>
+</div>
+</body></html>

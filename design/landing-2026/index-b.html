@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conversa · Soporte al cliente</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --cal:#F4F3FB;--tinta:#16133D;--buga:#E0218A;--mango:#FFC53D;--jade:#0E9F7E;--lila:#D9D4FA;
+  --gris:#5B5880;--linea:#DAD7EE;--suave:#ECEAF8;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;--body:"Instrument Sans",system-ui,sans-serif;--mono:"Martian Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--cal);color:var(--tinta);font:17px/1.55 var(--body);-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1280px;margin:0 auto;padding:0 40px}
+:focus-visible{outline:3px solid var(--buga);outline-offset:3px;border-radius:6px}
+
+.logo{display:inline-flex;align-items:center;gap:8px;font:800 26px/1 var(--display);letter-spacing:-.03em}
+.logo .b{position:relative;background:var(--buga);color:#fff;padding:5px 11px 7px;border-radius:14px 14px 14px 4px}
+.logo .b::after{content:"";position:absolute;left:-1px;bottom:-7px;border-left:10px solid var(--buga);border-bottom:8px solid transparent}
+
+nav{display:flex;align-items:center;justify-content:space-between;padding:24px 0}
+nav ul{display:flex;gap:32px;list-style:none;font-weight:500;font-size:15px}
+nav .acts{display:flex;gap:14px;align-items:center;font-weight:600;font-size:15px}
+
+.btn{display:inline-flex;align-items:center;gap:10px;font:600 16px/1 var(--body);padding:16px 24px;border-radius:999px;border:2px solid var(--tinta);white-space:nowrap;transition:transform .15s,box-shadow .15s}
+.btn.pri{background:var(--buga);color:#fff;box-shadow:4px 4px 0 var(--tinta)}
+.btn.pri:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0 var(--tinta)}
+.btn.ghost{background:#fff}
+.btn.sm{padding:10px 17px;font-size:14px}
+.btn.sm.pri{box-shadow:3px 3px 0 var(--tinta)}
+
+/* hero */
+.hero{display:grid;grid-template-columns:.9fr 1.1fr;gap:48px;align-items:center;padding:40px 0 80px}
+.kicker{display:inline-flex;gap:8px;align-items:center;font:600 12px/1 var(--mono);color:var(--gris);background:#fff;border:1.5px solid var(--linea);padding:8px 12px;border-radius:999px;margin-bottom:26px}
+.kicker i{width:8px;height:8px;border-radius:50%;background:var(--jade);display:block}
+h1{font:800 clamp(48px,5.6vw,82px)/.96 var(--display);letter-spacing:-.045em}
+h1 .t{display:inline-flex;font:600 .44em/1 var(--mono);letter-spacing:-.02em;background:var(--mango);padding:.32em .5em .3em;border-radius:.7em .7em .7em .15em;border:2px solid var(--tinta);box-shadow:4px 4px 0 var(--tinta);vertical-align:.4em;transform:rotate(-3deg)}
+.lead{font-size:19px;line-height:1.55;max-width:31em;margin:26px 0 32px;color:#2a2659}
+.ctas{display:flex;gap:14px;flex-wrap:wrap}
+
+/* inbox */
+.inbox{background:#fff;border:2px solid var(--tinta);border-radius:24px;box-shadow:10px 10px 0 var(--buga);overflow:hidden;display:grid;grid-template-columns:250px 1fr;min-height:520px;font-size:13.5px}
+.ib-top{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1.5px solid var(--linea);background:var(--tinta);color:#fff}
+.ib-top b{font:700 15px var(--display)}
+.ib-top .f{display:flex;gap:6px;font:600 11px var(--mono)}
+.ib-top .f span{padding:5px 9px;border-radius:999px;background:#2c2867}
+.ib-top .f span.on{background:var(--mango);color:var(--tinta)}
+.list{border-right:1.5px solid var(--linea);background:#FBFAFF}
+.row{display:grid;grid-template-columns:26px 1fr;gap:10px;padding:12px 14px;border-bottom:1px solid var(--suave)}
+.row.sel{background:#fff;box-shadow:inset 4px 0 0 var(--buga)}
+.row b{font-size:13.5px;display:flex;justify-content:space-between}
+.row b small{font:400 10px var(--mono);color:var(--gris)}
+.row p{color:var(--gris);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st{display:inline-block;margin-top:5px;font:600 9.5px/1 var(--mono);padding:4px 7px;border-radius:6px}
+.st.a{background:#E6F6F1;color:#0a6e57}
+.st.e{background:#FFF3D1;color:#8a5a00}
+.st.r{background:var(--suave);color:var(--gris)}
+.ch{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;color:#fff;font:800 11px var(--display)}
+.em{font-family:var(--body)!important;font-weight:700!important}
+.wa{background:#25A35A}.ig{background:#C13584}.ms{background:#2F6BFF}.em{background:#16133D}.tg{background:#2AA0D8}
+.conv{display:flex;flex-direction:column}
+.ch-head{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1.5px solid var(--linea)}
+.ch-head b{font-size:14.5px}.ch-head small{color:var(--gris);font-size:12px;display:block}
+.who{font:600 11px var(--mono);background:var(--lila);padding:6px 10px;border-radius:999px}
+.msgs{flex:1;padding:16px 18px;display:flex;flex-direction:column;gap:9px;background:#FAF9FF}
+.m{max-width:80%;padding:9px 12px;border-radius:15px;line-height:1.4}
+.m time{display:block;font:400 9.5px/1 var(--mono);opacity:.6;margin-top:5px;text-align:right}
+.in{background:var(--lila);align-self:flex-start;border-bottom-left-radius:4px}
+.out{background:var(--tinta);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+.out .tag{display:block;font:600 9.5px/1 var(--mono);color:var(--mango);margin-bottom:5px}
+.sys{align-self:center;font:600 11px/1.35 var(--mono);color:#0a6e57;background:#E6F6F1;border:1.5px dashed var(--jade);padding:7px 11px;border-radius:9px;text-align:center}
+.note{align-self:stretch;background:#FFF6DB;border:1.5px solid var(--mango);border-radius:12px;padding:9px 12px;font-size:12.5px}
+.note b{font:600 10px var(--mono);display:block;margin-bottom:3px;color:#8a5a00}
+.comp{display:flex;gap:8px;padding:12px 14px;border-top:1.5px solid var(--linea)}
+.comp span{flex:1;border:1.5px solid var(--linea);border-radius:999px;padding:9px 14px;color:var(--gris);font-size:13px}
+.comp em{font-style:normal;font:600 12px var(--body);background:var(--tinta);color:#fff;border-radius:999px;padding:9px 14px}
+
+/* canales */
+.chanbar{border-top:1.5px solid var(--linea);border-bottom:1.5px solid var(--linea);background:#fff}
+.chanbar .wrap{display:flex;align-items:center;gap:26px;padding-top:22px;padding-bottom:22px;flex-wrap:wrap}
+.chanbar .lbl{font:600 12px var(--mono);color:var(--gris)}
+.cc{display:flex;align-items:center;gap:10px;font:700 18px var(--display)}
+.cc .ch{width:30px;height:30px;font-size:13px}
+.cc small{font:600 10px var(--mono);color:#8a5a00;background:#FFF3D1;padding:4px 7px;border-radius:6px}
+
+/* día */
+.day{background:var(--tinta);color:#fff;padding:96px 0 104px}
+h2{font:800 clamp(36px,4.2vw,58px)/1.02 var(--display);letter-spacing:-.04em;max-width:17em}
+.day p.sub,.sub2{font-size:19px;margin-top:16px;max-width:36em}
+.day p.sub{color:#B9B5E6}.sub2{color:#3a3666}
+.rail{position:relative;margin-top:160px;height:132px}
+.axis{position:absolute;left:0;right:0;top:60px;height:2px;background:#3d3878}
+.open{position:absolute;top:44px;height:34px;left:calc(9/24*100%);width:calc(10/24*100%);background:rgba(255,197,61,.14);border:1.5px solid rgba(255,197,61,.55);border-radius:8px}
+.open span{position:absolute;top:40px;left:6px;white-space:nowrap;font:600 11px var(--mono);color:var(--mango)}
+.hrs{position:absolute;top:112px;left:0;right:0;display:flex;justify-content:space-between;font:400 11px var(--mono);color:#8580c2}
+.pin{position:absolute;top:61px;transform:translateX(-50%)}
+.pin::before{content:"";position:absolute;left:50%;top:-7px;width:12px;height:12px;border-radius:50%;background:var(--buga);border:2.5px solid var(--tinta);transform:translateX(-50%)}
+.pin .q{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);width:206px;background:#fff;color:var(--tinta);border-radius:16px 16px 16px 4px;padding:11px 13px;font-size:13.5px;line-height:1.35}
+.pin.up2 .q{bottom:122px}
+.pin .q time{font:600 10.5px var(--mono);color:var(--buga);display:flex;gap:6px;align-items:center;margin-bottom:5px}
+.pin .q time .ch{width:18px;height:18px;border-radius:5px;font-size:9px}
+.pin .q i{display:block;font:600 11px/1.25 var(--mono);font-style:normal;margin-top:8px;color:var(--jade)}
+.pin .q i.h{color:#b06d00}
+.mlist{display:none;flex-direction:column;gap:12px;margin-top:40px}
+.mlist .q{background:#fff;color:var(--tinta);border-radius:16px 16px 16px 4px;padding:12px 14px;font-size:15px}
+.mlist .q time{font:600 11px var(--mono);color:var(--buga);display:block;margin-bottom:4px}
+.mlist .q i{display:block;font:600 11.5px var(--mono);font-style:normal;margin-top:8px;color:var(--jade)}
+.mlist .q i.h{color:#b06d00}
+
+.sec{padding:110px 0}
+
+/* recorrido */
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin-top:56px;position:relative}
+.flow::before{content:"";position:absolute;left:40px;right:40px;top:31px;height:2px;background:repeating-linear-gradient(90deg,var(--tinta) 0 8px,transparent 8px 14px)}
+.fs{position:relative;padding-right:28px}
+.fs .dot{width:64px;height:64px;border-radius:20px 20px 20px 6px;border:2px solid var(--tinta);display:grid;place-items:center;font:800 22px var(--display);position:relative;background:#fff}
+.fs:nth-child(1) .dot{background:var(--lila)}
+.fs:nth-child(2) .dot{background:var(--tinta);color:var(--mango)}
+.fs:nth-child(3) .dot{background:var(--mango)}
+.fs:nth-child(4) .dot{background:var(--jade);color:#fff}
+.fs h3{font:700 23px/1.12 var(--display);letter-spacing:-.02em;margin:22px 0 8px}
+.fs p{color:#3a3666;font-size:15.5px}
+
+/* tamaños */
+.sizes{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:52px}
+.sz{background:#fff;border:2px solid var(--tinta);border-radius:26px;padding:30px 28px 32px;display:flex;flex-direction:column}
+.sz.mid{background:var(--tinta);color:#fff}
+.sz .who2{font:600 12px var(--mono);color:var(--buga)}
+.sz.mid .who2{color:var(--mango)}
+.sz h3{font:800 32px/1.02 var(--display);letter-spacing:-.035em;margin:12px 0 12px}
+.sz>p{font-size:16px;color:#3a3666;margin-bottom:20px}
+.sz.mid>p{color:#C9C5F0}
+.sz ul{list-style:none;border-top:1.5px solid var(--linea);margin-top:auto}
+.sz.mid ul{border-color:#3d3878}
+.sz li{padding:11px 0;border-bottom:1.5px solid var(--linea);font-size:15px;display:flex;gap:10px}
+.sz.mid li{border-color:#3d3878}
+.sz li::before{content:"✓";font:700 13px var(--mono);color:var(--jade)}
+.sz.mid li::before{color:var(--mango)}
+
+/* bandeja */
+.feat{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-top:52px;border-top:2px solid var(--tinta)}
+.fc{padding:28px 28px 30px 0;border-bottom:1.5px solid var(--linea)}
+.fc:not(:nth-child(3n+1)){padding-left:28px;border-left:1.5px solid var(--linea)}
+.fc h3{font:700 21px/1.15 var(--display);letter-spacing:-.02em;margin-bottom:8px;display:flex;gap:10px;align-items:center}
+.fc h3 .g{width:28px;height:28px;border-radius:9px 9px 9px 3px;border:2px solid var(--tinta);flex:none}
+.fc p{color:#3a3666;font-size:15.5px}
+
+/* seguridad */
+.trust{background:#fff;border-top:2px solid var(--tinta);border-bottom:2px solid var(--tinta)}
+.trust .wrap{display:grid;grid-template-columns:.85fr 1.15fr;gap:64px;padding-top:96px;padding-bottom:96px}
+.trust ul{list-style:none;border-top:2px solid var(--tinta)}
+.trust li{display:grid;grid-template-columns:200px 1fr;gap:20px;padding:18px 0;border-bottom:1.5px solid var(--linea)}
+.trust li b{font:700 18px/1.25 var(--display)}
+.trust li span{color:#3a3666;font-size:15.5px}
+
+.final{background:var(--buga);color:#fff;padding:96px 0 0;overflow:hidden;border-top:2px solid var(--tinta)}
+.final h2{font-size:clamp(44px,5.4vw,78px);line-height:.98;max-width:12em}
+.final .btn.pri{background:var(--mango);color:var(--tinta)}
+.final .btn.ghost{background:transparent;border-color:#fff;color:#fff}
+.giant{font:800 min(30vw,420px)/.78 var(--display);letter-spacing:-.07em;margin-top:70px;white-space:nowrap;display:flex;align-items:flex-end;gap:.06em}
+.giant .dot{width:.17em;height:.17em;border-radius:50%;background:var(--mango);margin-bottom:.08em}
+footer{background:var(--tinta);color:#B9B5E6;font-size:14px;padding:26px 0}
+footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:980px){
+  .wrap{padding:0 20px}
+  nav ul,nav .acts .hide-m{display:none}
+  .logo{font-size:22px}
+  .hero{grid-template-columns:1fr;padding:16px 0 64px;gap:44px}
+  .inbox{grid-template-columns:1fr;min-height:0;box-shadow:6px 6px 0 var(--buga)}
+  .list .row:nth-child(n+3){display:none}
+  .ib-top .f span:not(.on){display:none}
+  .rail{display:none}.mlist{display:flex}
+  .flow,.sizes,.feat,.trust .wrap{grid-template-columns:1fr}
+  .flow::before{display:none}
+  .fs{padding:0 0 30px}
+  .fc,.fc:not(:nth-child(3n+1)){padding:22px 0;border-left:0}
+  .trust li{grid-template-columns:1fr;gap:4px}
+  .sec{padding:80px 0}.day{padding:70px 0}
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <nav aria-label="Principal">
+    <a href="#" class="logo" aria-label="Conversa, inicio"><span class="b">hola</span>conversa</a>
+    <ul><li><a href="#como">Cómo funciona</a></li><li><a href="#equipos">Para tu equipo</a></li><li><a href="#tamanos">Empresas</a></li><li><a href="#seguridad">Seguridad</a></li><li><a href="#">Precios</a></li></ul>
+    <div class="acts"><a class="hide-m" href="#">Entrar</a><a class="btn ghost sm hide-m" href="#">Hablar con ventas</a><a class="btn pri sm" href="#">Crear cuenta</a></div>
+  </nav>
+
+  <header class="hero">
+    <div>
+      <span class="kicker"><i></i>Soporte al cliente con IA y con tu equipo</span>
+      <h1>Tu soporte contesta, aunque sean las <span class="t">3:07 a.m.</span></h1>
+      <p class="lead">Conversa resuelve las preguntas de siempre en WhatsApp, Instagram, Messenger y correo. Lo que necesita a una persona llega a tu equipo con toda la conversación, para que nadie tenga que volver a explicar.</p>
+      <div class="ctas">
+        <a class="btn pri" href="#">Crear cuenta →</a>
+        <a class="btn ghost" href="#">Hablar con ventas</a>
+      </div>
+    </div>
+
+    <div class="inbox" aria-label="Ejemplo de la bandeja de soporte">
+      <div class="ib-top"><b>Bandeja de soporte</b><div class="f"><span>Todas</span><span class="on">Para tu equipo · 2</span><span>Resueltas</span></div></div>
+      <div class="list">
+        <div class="row"><span class="ch wa">W</span><div><b>Mariana R.<small>01:14</small></b><p>No me llega el código para entrar</p><span class="st a">✓ contestó el asistente</span></div></div>
+        <div class="row"><span class="ch em">@</span><div><b>compras@ferrenor.mx<small>07:02</small></b><p>Factura del pedido 4821</p><span class="st a">✓ contestó el asistente</span></div></div>
+        <div class="row sel"><span class="ch ig">I</span><div><b>@lalo.mtz<small>12:30</small></b><p>Mi pedido llegó dañado</p><span class="st e">↪ para tu equipo · Ana</span></div></div>
+        <div class="row"><span class="ch ms">M</span><div><b>Jorge T.<small>16:45</small></b><p>¿Cómo cambio mi dirección?</p><span class="st a">✓ contestó el asistente</span></div></div>
+        <div class="row"><span class="ch wa">W</span><div><b>Sofía L.<small>22:48</small></b><p>Quiero cancelar mi suscripción</p><span class="st e">↪ para tu equipo</span></div></div>
+        <div class="row"><span class="ch tg">T</span><div><b>Raúl C.<small>Ayer</small></b><p>Gracias, ya quedó</p><span class="st r">resuelta</span></div></div>
+      </div>
+      <div class="conv">
+        <div class="ch-head"><div><b>@lalo.mtz · Instagram</b><small>Cliente desde marzo · 3 conversaciones</small></div><span class="who">Asignada a Ana</span></div>
+        <div class="msgs">
+          <div class="m in">hola, mi pedido llegó con la tapa rota 😕<time>12:30</time></div>
+          <div class="m out"><span class="tag">ASISTENTE</span>Lamento mucho eso. ¿Me compartes tu número de pedido para revisarlo?<time>12:30</time></div>
+          <div class="m in">es el 4907<time>12:31</time></div>
+          <div class="sys">↪ Pasada a tu equipo · motivo: producto dañado</div>
+          <div class="note"><b>NOTA INTERNA · ANA</b>Ya revisé el pedido 4907. Ofrecer reposición sin costo.</div>
+        </div>
+        <div class="comp"><span>Escribe tu respuesta…</span><em>Responder</em></div>
+      </div>
+    </div>
+  </header>
+</div>
+
+<div class="chanbar" id="canales">
+  <div class="wrap">
+    <span class="lbl">Un solo lugar para</span>
+    <span class="cc"><span class="ch wa">W</span>WhatsApp</span>
+    <span class="cc"><span class="ch ig">I</span>Instagram</span>
+    <span class="cc"><span class="ch ms">M</span>Messenger</span>
+    <span class="cc"><span class="ch em">@</span>Correo <small>pronto</small></span>
+    <span class="cc"><span class="ch tg">T</span>Telegram</span>
+  </div>
+</div>
+
+<section class="day" aria-labelledby="dia">
+  <div class="wrap">
+    <h2 id="dia">Las preguntas no esperan a que abras.</h2>
+    <p class="sub">Un día de soporte, por cualquier canal. Lo que el asistente puede resolver, lo resuelve. Lo demás espera a tu equipo, en orden y con contexto.</p>
+    <div class="rail" aria-hidden="true">
+      <div class="axis"></div>
+      <div class="open"><span>tu horario de soporte · 9:00 a 19:00</span></div>
+      <div class="pin" style="left:calc(1.2/24*100%)"><div class="q"><time><span class="ch wa">W</span>01:14</time>No me llega el código para entrar<i>✓ contestó el asistente</i></div></div>
+      <div class="pin up2" style="left:calc(7/24*100%)"><div class="q"><time><span class="ch em">@</span>07:02</time>¿Me reenvían la factura del pedido 4821?<i>✓ contestó el asistente</i></div></div>
+      <div class="pin" style="left:calc(12.5/24*100%)"><div class="q"><time><span class="ch ig">I</span>12:30</time>Mi pedido llegó dañado 😕<i class="h">↪ lo tomó Ana</i></div></div>
+      <div class="pin up2" style="left:calc(16.75/24*100%)"><div class="q"><time><span class="ch ms">M</span>16:45</time>¿Cómo cambio mi dirección de envío?<i>✓ contestó el asistente</i></div></div>
+      <div class="pin" style="left:calc(22.8/24*100%)"><div class="q"><time><span class="ch wa">W</span>22:48</time>Quiero cancelar mi suscripción<i class="h">↪ para tu equipo a las 9:00</i></div></div>
+      <div class="hrs"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+    </div>
+    <div class="mlist">
+      <div class="q"><time>01:14 · WhatsApp</time>No me llega el código para entrar<i>✓ contestó el asistente</i></div>
+      <div class="q"><time>07:02 · Correo</time>¿Me reenvían la factura del pedido 4821?<i>✓ contestó el asistente</i></div>
+      <div class="q"><time>12:30 · Instagram</time>Mi pedido llegó dañado 😕<i class="h">↪ lo tomó Ana</i></div>
+      <div class="q"><time>22:48 · WhatsApp</time>Quiero cancelar mi suscripción<i class="h">↪ para tu equipo a las 9:00</i></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="como">
+  <div class="wrap">
+    <h2>Del primer mensaje a resuelto, sin que el cliente repita nada.</h2>
+    <div class="flow">
+      <div class="fs"><div class="dot">1</div><h3>Llega el mensaje</h3><p>Por WhatsApp, Instagram, Messenger o correo. Todo cae en la misma bandeja.</p></div>
+      <div class="fs"><div class="dot">2</div><h3>El asistente contesta</h3><p>Con tus políticas, guías y preguntas frecuentes. Si no sabe algo, no lo inventa.</p></div>
+      <div class="fs"><div class="dot">3</div><h3>Pasa a tu equipo</h3><p>Quejas, cancelaciones, pagos o quien pida una persona. Llega con la conversación completa.</p></div>
+      <div class="fs"><div class="dot">✓</div><h3>Tu equipo resuelve</h3><p>Responde desde la bandeja, deja notas internas y la marca como resuelta.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="tamanos" style="padding-top:0">
+  <div class="wrap">
+    <h2>Para el tamaño de tu operación.</h2>
+    <p class="sub2">Empieza con una persona contestando todo o con un equipo de soporte por turnos. Conversa crece contigo.</p>
+    <div class="sizes">
+      <div class="sz">
+        <span class="who2">EMPRESA PEQUEÑA</span>
+        <h3>Tú y el asistente</h3>
+        <p>El asistente contesta lo de siempre y te avisa al celular cuando alguien te necesita.</p>
+        <ul><li>Listo en una tarde</li><li>Avisos en tu celular y tu computadora</li><li>Simulador para probar antes de abrir</li></ul>
+      </div>
+      <div class="sz mid">
+        <span class="who2">EMPRESA MEDIANA</span>
+        <h3>Un equipo, una bandeja</h3>
+        <p>Todo tu equipo atiende desde el mismo lugar, sin pisarse ni dejar mensajes olvidados.</p>
+        <ul><li>Asignación de conversaciones</li><li>Roles de administrador y agente</li><li>Notas internas e historial del cliente</li></ul>
+      </div>
+      <div class="sz">
+        <span class="who2">EMPRESA GRANDE</span>
+        <h3>Varias marcas, un control</h3>
+        <p>Cada marca o área con su asistente, su equipo y sus datos, con reglas claras de quién ve qué.</p>
+        <ul><li>Una cuenta por marca o área</li><li>Retención de datos a tu medida</li><li>Acompañamiento en la puesta en marcha</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="equipos" style="padding-top:0">
+  <div class="wrap">
+    <h2>Hecho para el día a día de un equipo de soporte.</h2>
+    <div class="feat">
+      <div class="fc"><h3><span class="g" style="background:var(--lila)"></span>Una bandeja para todo</h3><p>WhatsApp, Instagram, Messenger y correo en una sola lista, con filtros por estado.</p></div>
+      <div class="fc"><h3><span class="g" style="background:var(--mango)"></span>Reglas para pasar a una persona</h3><p>Tú decides qué temas nunca contesta el asistente: pagos, quejas, cancelaciones.</p></div>
+      <div class="fc"><h3><span class="g" style="background:var(--tinta)"></span>Asignación y estados</h3><p>Toma una conversación, asígnala a alguien, devuélvela al asistente o márcala como resuelta.</p></div>
+      <div class="fc"><h3><span class="g" style="background:var(--buga)"></span>Notas internas</h3><p>Tu equipo se deja contexto entre turnos. El cliente nunca las ve.</p></div>
+      <div class="fc"><h3><span class="g" style="background:var(--jade)"></span>Avisos al momento</h3><p>Cuando algo llega para tu equipo, se entera en el celular y en la computadora.</p></div>
+      <div class="fc"><h3><span class="g" style="background:#fff"></span>Métricas del día</h3><p>Cuántas conversaciones resolvió el asistente y cuántas atendió tu equipo.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="trust" id="seguridad">
+  <div class="wrap">
+    <div><h2>Los datos de tus clientes, bien cuidados.</h2><p class="sub2">Lo que prometemos, por escrito.</p></div>
+    <ul>
+      <li><b>Datos separados</b><span>Cada empresa ve solo sus conversaciones y sus clientes.</span></li>
+      <li><b>Retención</b><span>Los mensajes viejos se borran solos, en el plazo que definas.</span></li>
+      <li><b>Datos ocultos</b><span>Correos y teléfonos de tus clientes aparecen enmascarados en el panel.</span></li>
+      <li><b>Derecho de borrado</b><span>Si un cliente lo pide, borras sus datos.</span></li>
+      <li><b>Sin inventos</b><span>El asistente solo usa tu información. Si no sabe algo, no lo inventa.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <h2>Dile hola a cada cliente, a la hora que escriba.</h2>
+    <div class="ctas" style="margin-top:36px"><a class="btn pri" href="#">Crear cuenta →</a><a class="btn ghost" href="#">Hablar con ventas</a></div>
+    <div class="giant" aria-hidden="true">hola<span class="dot"></span></div>
+  </div>
+</section>
+<footer><div class="wrap"><span>© 2026 Conversa · holaconversa.com</span><span>Privacidad · Términos · Contacto</span></div></footer>
+</body>
+</html>
